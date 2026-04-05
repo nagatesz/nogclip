@@ -1,10 +1,12 @@
 "use client";
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import "./Header.css";
 
 export default function Header() {
   const [scrolled, setScrolled] = useState(false);
+  const pathname = usePathname();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
@@ -21,8 +23,24 @@ export default function Header() {
         </div>
       </Link>
       <nav className="header-nav">
-        <Link href="/" className="header-nav-link">Home</Link>
-        <Link href="/studio" className="header-nav-link">Studio</Link>
+        <Link 
+          href="/" 
+          className={`header-nav-link ${pathname === "/" ? "active" : ""}`}
+        >
+          Home
+        </Link>
+        <Link 
+          href="/projects" 
+          className={`header-nav-link ${pathname === "/projects" ? "active" : ""}`}
+        >
+          Projects
+        </Link>
+        <Link 
+          href="/studio" 
+          className={`header-nav-link ${pathname === "/studio" ? "active" : ""}`}
+        >
+          Studio
+        </Link>
         <Link href="/studio" className="btn btn-primary btn-sm">
           Start Clipping
         </Link>

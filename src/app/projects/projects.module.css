@@ -14,8 +14,10 @@
 
 .sidebar {
   width: 320px;
-  background-color: rgba(255, 255, 255, 0.02);
-  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(15, 15, 25, 0.4);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
   display: flex;
   flex-direction: column;
 }
@@ -29,9 +31,11 @@
 }
 
 .sidebarHeader h2 {
-  font-size: 1.25rem;
-  font-weight: 600;
+  font-size: 1.1rem;
+  font-weight: 700;
   margin: 0;
+  letter-spacing: -0.01em;
+  color: #fff;
 }
 
 .projectList {
@@ -53,22 +57,26 @@
 .projectCard {
   display: flex;
   gap: 1rem;
-  padding: 0.75rem;
-  background-color: rgba(255, 255, 255, 0.03);
-  border-radius: 8px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.05);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
+  overflow: hidden;
 }
 
 .projectCard:hover {
-  background-color: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
 }
 
 .projectCard.active {
-  background-color: rgba(139, 92, 246, 0.15); /* primary color with opacity */
-  border-color: var(--primary);
+  background: rgba(139, 92, 246, 0.12);
+  border-color: rgba(139, 92, 246, 0.5);
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.1);
 }
 
 .projectThumb {
@@ -101,12 +109,13 @@
 }
 
 .projectTitle {
-  font-size: 0.9rem;
-  font-weight: 600;
-  margin: 0 0 0.5rem 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin: 0 0 0.4rem 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: #fff;
 }
 
 .projectStatus {
@@ -141,8 +150,14 @@
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
-  background: none;
-  border: none;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   color: #666;
   font-size: 1.2rem;
   cursor: pointer;
@@ -184,15 +199,23 @@
 }
 
 .projectWorkspace {
-  padding: 2rem;
+  padding: 3rem;
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 2.5rem;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .workspaceHeader h2 {
-  font-size: 2rem;
-  margin: 0 0 0.5rem 0;
+  font-size: 2.5rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin: 0 0 0.75rem 0;
+  background: linear-gradient(to bottom, #fff, #94a3b8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .workspaceMeta {
@@ -231,19 +254,23 @@
 }
 
 .clipCard {
-  background-color: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  padding: 1.5rem;
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 20px;
+  padding: 2rem;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  transition: transform 0.2s;
+  gap: 1.25rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
 }
 
 .clipCard:hover {
-  transform: translateY(-2px);
+  transform: translateY(-5px);
+  background: rgba(255, 255, 255, 0.05);
   border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
 }
 
 .clipHeader {

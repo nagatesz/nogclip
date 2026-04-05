@@ -26,8 +26,8 @@ interface VideoState {
   width: number; height: number; thumbnail: string; title: string;
 }
 
-// 30 min maximum processable duration in browser to avoid OOM
-const MAX_BROWSER_DURATION = 30 * 60; 
+// 4 hour maximum processable duration in browser with WORKERFS
+const MAX_BROWSER_DURATION = 4 * 60 * 60; 
 
 type SidebarTab = "ai" | "captions" | "media" | "brand" | "broll" | "transitions" | "text" | "music" | null;
 

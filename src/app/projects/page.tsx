@@ -23,7 +23,7 @@ export default function ProjectsDashboard() {
       const metaRes = await fetch(`/api/youtube-download?url=${encodeURIComponent(ytUrl)}`);
       if (!metaRes.ok) throw new Error("Could not fetch YouTube metadata.");
       const meta = await metaRes.json();
-      await updateProject(projectId, { title: meta.title, thumbnailUrl: meta.thumbnail });
+      await updateProject(projectId, { title: meta.title || "YouTube Video", thumbnailUrl: meta.thumbnail });
 
       // 2. Fetch Cobalt audio-only proxy stream
       await updateProject(projectId, { progressMessage: "Requesting audio stream...", progress: 10 });
@@ -146,9 +146,13 @@ export default function ProjectsDashboard() {
         <div className={styles.sidebar}>
           <div className={styles.sidebarHeader}>
             <h2>Your Projects</h2>
-            <Link href="/studio" className="btn btn-primary" style={{ padding: "0.5rem 1rem", fontSize: "0.9rem" }}>
+            <button 
+              className="btn btn-primary" 
+              style={{ padding: "0.5rem 1rem", fontSize: "0.9rem" }}
+              onClick={() => { setActiveProject(null); setActiveClips([]); }}
+            >
               + New
-            </Link>
+            </button>
           </div>
           
           <div className={styles.projectList}>

@@ -18,7 +18,9 @@ const COBALT_INSTANCES = [
   "https://cobalt.blackcat.sweeux.org/",
   "https://cobalt.kittycat.boo/",
   "https://dl.woof.monster/",
-  "https://cobalt.cjs.nz/"
+  "https://cobalt.cjs.nz/",
+  "https://cobalt.qwedl.com/",
+  "https://api.cobalt.tools/",
 ];
 
 async function fetchFromCobalt(videoUrl: string, options: any = {}): Promise<CobaltResponse | null> {
@@ -57,7 +59,7 @@ export async function POST(request: NextRequest) {
     const match = url.match(ytRegex);
     if (!match || !match[5]) return NextResponse.json({ error: "Invalid YouTube URL" }, { status: 400 });
 
-    const requestOptions = proxyStream ? {} : { downloadMode: "audio" };
+    const requestOptions = proxyStream ? {} : { downloadMode: "audio", isAudioOnly: true, aFormat: "mp3" };
     // We send proxyStream = false to Cobalt to ensure no audio+video mux wait time if client just wants raw stream
     const cobaltData = await fetchFromCobalt(url, requestOptions);
     
@@ -98,17 +100,25 @@ export async function GET(request: NextRequest) {
   const url = searchParams.get("url");
   if (!url) return NextResponse.json({ error: "No URL" }, { status: 400 });
   try {
-    const idMatch = url.match(/(?:v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/);
+    const idMatch = url.match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([a-zA-Z0-9_-]{11})/);
     const videoId = idMatch?.[1];
     if (!videoId) return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
-    const thumbnail = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
-    const sdThumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+    
+    // Fallback logic for thumbnails: try maxresdefault, then hqdefault
+    let thumbnail = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+    try {
+       const thumbCheck = await fetch(thumbnail, { method: "HEAD", signal: AbortSignal.timeout(2000) });
+       if (!thumbCheck.ok) thumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+    } catch {
+       thumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+    }
+
     let title = "YouTube Video";
     try {
       const oembedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`, { signal: AbortSignal.timeout(5000) });
       if (oembedRes.ok) { const oembed = await oembedRes.json(); title = oembed.title || title; }
     } catch { /* fallback */ }
-    return NextResponse.json({ videoId, title, thumbnail, sdThumbnail });
+    return NextResponse.json({ videoId, title, thumbnail });
   } catch (error) {
     console.error("Metadata fetch error:", error);
     return NextResponse.json({ error: "Failed to fetch metadata" }, { status: 500 });
