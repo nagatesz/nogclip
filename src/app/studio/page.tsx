@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import {
   loadFFmpeg, extractAudio, exportClip, trimVideo,
@@ -29,7 +29,7 @@ type SidebarTab = "ai" | "captions" | "media" | "brand" | "broll" | "transitions
 const HIGHLIGHT_KEYWORDS = new Set(["amazing","incredible","insane","crazy","billion","million","money","dollars","viral","trending","breaking","important","never","always","best","worst","extraordinary","unbelievable"]);
 const STRONG_WORDS = new Set(["fuck","fucking","shit","damn","hell","ass","bitch"]);
 
-const LAYOUT_DEFS: { id: LayoutType | "screenshare" | "gameplay"; label: string; icon: JSX.Element }[] = [
+const LAYOUT_DEFS: { id: LayoutType | "screenshare" | "gameplay"; label: string; icon: React.ReactNode }[] = [
   { id: "fill", label: "Fill", icon: <div style={{ width: 22, height: 36, border: "1.5px solid currentColor", borderRadius: 3, background: "currentColor", opacity: 0.3 }} /> },
   { id: "fit", label: "Fit", icon: <div style={{ width: 22, height: 36, border: "1.5px solid currentColor", borderRadius: 3, display: "flex", flexDirection: "column", justifyContent: "center", gap: 2, padding: 4 }}><div style={{ height: 16, background: "currentColor", opacity: 0.5, borderRadius: 1 }} /></div> },
   { id: "split", label: "Split", icon: <div style={{ width: 22, height: 36, border: "1.5px solid currentColor", borderRadius: 3, display: "flex", flexDirection: "column", overflow: "hidden" }}><div style={{ flex: 1, borderBottom: "1.5px solid currentColor", opacity: 0.4, background: "currentColor" }} /><div style={{ flex: 1, opacity: 0.2, background: "currentColor" }} /></div> },
