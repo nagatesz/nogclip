@@ -1,622 +1,407 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import Header from "@/components/Header";
+import Link from "next/link";
 import {
-  loadFFmpeg,
-  extractAudio,
-  trimVideo,
-  exportClip,
-  getVideoInfo,
-  generateThumbnail,
-  type ExportOptions,
-  type ProgressCallback,
+  loadFFmpeg, extractAudio, exportClip, trimVideo,
+  getVideoInfo, generateThumbnail, type ExportOptions, type ProgressCallback,
 } from "@/lib/ffmpeg";
 import { transcribeAudio, type TranscriptionResult } from "@/lib/transcription";
+import { analyzeTranscript, getViralityColor, getViralityLabel, type ClipSuggestion } from "@/lib/ai-analysis";
 import {
-  analyzeTranscript,
-  getViralityColor,
-  getViralityLabel,
-  type ClipSuggestion,
-} from "@/lib/ai-analysis";
-import {
-  CAPTION_PRESETS,
-  generateASSSubtitles,
-  type CaptionStyle,
+  CAPTION_PRESETS, GOOGLE_FONTS, generateASSSubtitles,
+  renderLiveCaptions, loadGoogleFont, type CaptionStyle,
 } from "@/lib/caption-renderer";
-import { generateWaveform, renderWaveform } from "@/lib/waveform";
+import { generateWaveform } from "@/lib/waveform";
+import type { LayoutType } from "@/lib/face-detection";
+import Timeline from "@/components/Timeline";
 import "./studio.css";
 
-type ProcessingStage =
-  | "idle"
-  | "loading-ffmpeg"
-  | "extracting-audio"
-  | "transcribing"
-  | "analyzing"
-  | "ready"
-  | "exporting"
-  | "error";
+type ProcessingStage = "idle" | "loading-ffmpeg" | "extracting-audio" | "transcribing" | "analyzing" | "ready" | "exporting" | "downloading" | "error";
 
 interface VideoState {
-  file: File | null;
-  url: string;
-  duration: number;
-  width: number;
-  height: number;
-  thumbnail: string;
+  file: File | null; url: string; duration: number;
+  width: number; height: number; thumbnail: string; title: string;
 }
 
+type SidebarTab = "ai" | "captions" | "media" | "brand" | "broll" | "transitions" | "text" | "music" | null;
+
+const HIGHLIGHT_KEYWORDS = new Set(["amazing","incredible","insane","crazy","billion","million","money","dollars","viral","trending","breaking","important","never","always","best","worst","extraordinary","unbelievable"]);
+const STRONG_WORDS = new Set(["fuck","fucking","shit","damn","hell","ass","bitch"]);
+
+const LAYOUT_DEFS: { id: LayoutType | "screenshare" | "gameplay"; label: string; icon: JSX.Element }[] = [
+  { id: "fill", label: "Fill", icon: <div style={{ width: 22, height: 36, border: "1.5px solid currentColor", borderRadius: 3, background: "currentColor", opacity: 0.3 }} /> },
+  { id: "fit", label: "Fit", icon: <div style={{ width: 22, height: 36, border: "1.5px solid currentColor", borderRadius: 3, display: "flex", flexDirection: "column", justifyContent: "center", gap: 2, padding: 4 }}><div style={{ height: 16, background: "currentColor", opacity: 0.5, borderRadius: 1 }} /></div> },
+  { id: "split", label: "Split", icon: <div style={{ width: 22, height: 36, border: "1.5px solid currentColor", borderRadius: 3, display: "flex", flexDirection: "column", overflow: "hidden" }}><div style={{ flex: 1, borderBottom: "1.5px solid currentColor", opacity: 0.4, background: "currentColor" }} /><div style={{ flex: 1, opacity: 0.2, background: "currentColor" }} /></div> },
+  { id: "three", label: "Three", icon: <div style={{ width: 22, height: 36, border: "1.5px solid currentColor", borderRadius: 3, display: "flex", flexDirection: "column", overflow: "hidden" }}><div style={{ flex: 2, borderBottom: "1.5px solid currentColor", background: "currentColor", opacity: 0.3 }} /><div style={{ flex: 1, display: "flex" }}><div style={{ flex: 1, borderRight: "1.5px solid currentColor", opacity: 0.15, background: "currentColor" }} /><div style={{ flex: 1, opacity: 0.1, background: "currentColor" }} /></div></div> },
+  { id: "four", label: "Four", icon: <div style={{ width: 22, height: 36, border: "1.5px solid currentColor", borderRadius: 3, display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", overflow: "hidden" }}>{[0,1,2,3].map(i => <div key={i} style={{ borderRight: i%2===0?"1.5px solid currentColor":"none", borderBottom: i<2?"1.5px solid currentColor":"none", background: "currentColor", opacity: 0.15 }} />)}</div> },
+  { id: "screenshare", label: "Screen", icon: <div style={{ width: 22, height: 36, border: "1.5px solid currentColor", borderRadius: 3, display: "flex", flexDirection: "column", overflow: "hidden" }}><div style={{ flex: 3, background: "currentColor", opacity: 0.25 }} /><div style={{ flex: 1, borderTop: "1.5px solid currentColor", background: "currentColor", opacity: 0.1 }} /></div> },
+  { id: "gameplay", label: "Gameplay", icon: <div style={{ width: 22, height: 36, border: "1.5px solid currentColor", borderRadius: 3, display: "flex", flexDirection: "column", overflow: "hidden" }}><div style={{ flex: 2, background: "currentColor", opacity: 0.3 }} /><div style={{ flex: 1, borderTop: "1.5px solid currentColor", background: "currentColor", opacity: 0.15 }} /></div> },
+];
+
 export default function StudioPage() {
-  // === State ===
   const [stage, setStage] = useState<ProcessingStage>("idle");
   const [stageMessage, setStageMessage] = useState("");
   const [error, setError] = useState("");
-
-  const [video, setVideo] = useState<VideoState>({
-    file: null,
-    url: "",
-    duration: 0,
-    width: 0,
-    height: 0,
-    thumbnail: "",
-  });
-
-  const [transcription, setTranscription] =
-    useState<TranscriptionResult | null>(null);
+  const [video, setVideo] = useState<VideoState>({ file: null, url: "", duration: 0, width: 0, height: 0, thumbnail: "", title: "Untitled Clip" });
+  const [transcription, setTranscription] = useState<TranscriptionResult | null>(null);
   const [clips, setClips] = useState<ClipSuggestion[]>([]);
   const [selectedClip, setSelectedClip] = useState<ClipSuggestion | null>(null);
   const [summary, setSummary] = useState("");
-
-  const [aspectRatio, setAspectRatio] = useState<"9:16" | "1:1" | "16:9">(
-    "9:16"
-  );
-  const [quality, setQuality] = useState<"720p" | "1080p">("1080p");
-  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(
-    CAPTION_PRESETS[0]
-  );
-
+  const [aspectRatio, setAspectRatio] = useState<"9:16"|"1:1"|"16:9">("9:16");
+  const [quality, setQuality] = useState<"720p"|"1080p">("1080p");
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(CAPTION_PRESETS[0]);
+  const [layout, setLayout] = useState<string>("fill");
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(0);
-
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportMessage, setExportMessage] = useState("");
-
   const [waveformData, setWaveformData] = useState<number[]>([]);
-  const [leftTab, setLeftTab] = useState<"clips" | "editor">("clips");
+  const [thumbnails, setThumbnails] = useState<string[]>([]);
+  const [splits, setSplits] = useState<number[]>([]);
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("ai");
+  const [ytUrl, setYtUrl] = useState("");
+  const [ytDownloading, setYtDownloading] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: "success"|"error" } | null>(null);
+  const [captionsEnabled, setCaptionsEnabled] = useState(true);
 
-  const [toast, setToast] = useState<{
-    message: string;
-    type: "success" | "error";
-  } | null>(null);
-
-  // === Refs ===
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const waveformCanvasRef = useRef<HTMLCanvasElement>(null);
-  const dropZoneRef = useRef<HTMLDivElement>(null);
+  const captionCanvasRef = useRef<HTMLCanvasElement>(null);
+  const transcriptBodyRef = useRef<HTMLDivElement>(null);
+  const canvasSizeRef = useRef({ w: 0, h: 0 });
 
-  // === Toast helper ===
-  const showToast = useCallback(
-    (message: string, type: "success" | "error" = "success") => {
-      setToast({ message, type });
-      setTimeout(() => setToast(null), 4000);
-    },
-    []
-  );
+  const showToast = useCallback((message: string, type: "success"|"error" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  }, []);
 
-  // === Format time ===
   const formatTime = (s: number): string => {
-    const m = Math.floor(s / 60);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
     const sec = Math.floor(s % 60);
-    return `${m.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}`;
+    if (h > 0) return `${h}:${m.toString().padStart(2,"0")}:${sec.toString().padStart(2,"0")}`;
+    return `${m.toString().padStart(2,"0")}:${sec.toString().padStart(2,"0")}`;
   };
 
-  // === Process video pipeline ===
-  const processVideo = useCallback(
-    async (file: File) => {
-      setError("");
-      try {
-        // Step 1: Get video info
-        setStage("loading-ffmpeg");
-        setStageMessage("Loading video processing engine...");
+  useEffect(() => { loadGoogleFont(captionStyle.fontFamily); }, [captionStyle.fontFamily]);
 
-        const info = await getVideoInfo(file);
-        const thumb = await generateThumbnail(file, 1);
-        const url = URL.createObjectURL(file);
-
-        setVideo({
-          file,
-          url,
-          duration: info.duration,
-          width: info.width,
-          height: info.height,
-          thumbnail: thumb,
-        });
-        setTrimStart(0);
-        setTrimEnd(info.duration);
-
-        // Step 2: Load FFmpeg
-        const onFFmpegProgress: ProgressCallback = (_p, msg) =>
-          setStageMessage(msg);
-        await loadFFmpeg(onFFmpegProgress);
-
-        // Step 3: Extract audio
-        setStage("extracting-audio");
-        setStageMessage("Extracting audio track...");
-        const audioBlob = await extractAudio(file, onFFmpegProgress);
-
-        // Generate waveform
-        try {
-          const wf = await generateWaveform(audioBlob, 300);
-          setWaveformData(wf);
-        } catch (e) {
-          console.warn("Waveform generation failed:", e);
+  // Caption canvas resize — only when container changes, not every frame
+  useEffect(() => {
+    const canvas = captionCanvasRef.current;
+    if (!canvas) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) {
+        const w = Math.round(e.contentRect.width * 2);
+        const h = Math.round(e.contentRect.height * 2);
+        if (w !== canvasSizeRef.current.w || h !== canvasSizeRef.current.h) {
+          canvas.width = w; canvas.height = h;
+          canvasSizeRef.current = { w, h };
         }
-
-        // Step 4: Transcribe
-        setStage("transcribing");
-        setStageMessage(
-          "Transcribing audio with Whisper AI (this may take a minute)..."
-        );
-
-        let transcriptResult: TranscriptionResult;
-        try {
-          transcriptResult = await transcribeAudio(audioBlob);
-          setTranscription(transcriptResult);
-        } catch (e) {
-          console.error("Transcription error:", e);
-          setStage("ready");
-          setStageMessage("");
-          showToast(
-            "Transcription failed — you can still edit manually. Check your GROQ_API_KEY.",
-            "error"
-          );
-          return;
-        }
-
-        // Step 5: AI Analysis
-        setStage("analyzing");
-        setStageMessage(
-          "AI is analyzing your content for viral clip potential..."
-        );
-
-        try {
-          const analysis = await analyzeTranscript(
-            transcriptResult.segments,
-            transcriptResult.words,
-            info.duration
-          );
-          setClips(analysis.clips);
-          setSummary(analysis.summary);
-          if (analysis.clips.length > 0) {
-            setSelectedClip(analysis.clips[0]);
-            setTrimStart(analysis.clips[0].start);
-            setTrimEnd(analysis.clips[0].end);
-          }
-        } catch (e) {
-          console.error("Analysis error:", e);
-          showToast(
-            "AI analysis failed — you can still edit manually. Check your GEMINI_API_KEY.",
-            "error"
-          );
-        }
-
-        setStage("ready");
-        setStageMessage("");
-        showToast("Video processed successfully! 🎉");
-      } catch (e) {
-        console.error("Processing error:", e);
-        setStage("error");
-        setError(
-          e instanceof Error ? e.message : "Unknown error occurred"
-        );
       }
-    },
-    [showToast]
-  );
+    });
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, [video.url]);
 
-  // === File handling ===
-  const handleFileSelect = useCallback(
-    (files: FileList | null) => {
-      if (!files || files.length === 0) return;
-      const file = files[0];
-      const validTypes = [
-        "video/mp4",
-        "video/webm",
-        "video/quicktime",
-        "video/x-msvideo",
-        "video/x-matroska",
-        "video/avi",
-      ];
-      if (
-        !validTypes.some(
-          (t) =>
-            file.type === t ||
-            file.name.match(/\.(mp4|webm|mov|avi|mkv)$/i)
-        )
-      ) {
-        showToast("Please upload a video file (MP4, WebM, MOV, AVI, MKV)", "error");
-        return;
-      }
-      processVideo(file);
-    },
-    [processVideo, showToast]
-  );
-
-  // === Drag and drop ===
-  const [isDragOver, setIsDragOver] = useState(false);
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(true);
-  };
-
-  const handleDragLeave = () => {
-    setIsDragOver(false);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(false);
-    handleFileSelect(e.dataTransfer.files);
-  };
-
-  // === Video controls ===
-  const togglePlay = () => {
-    if (!videoRef.current) return;
-    if (isPlaying) {
-      videoRef.current.pause();
-    } else {
-      videoRef.current.play();
-    }
-    setIsPlaying(!isPlaying);
-  };
-
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const time = parseFloat(e.target.value);
-    if (videoRef.current) {
-      videoRef.current.currentTime = time;
-    }
-    setCurrentTime(time);
-  };
-
-  // Video time update
+  // Video time update + caption rendering
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-
-    const onTimeUpdate = () => setCurrentTime(v.currentTime);
+    const onTimeUpdate = () => {
+      setCurrentTime(v.currentTime);
+      if (captionsEnabled && transcription && captionStyle.id !== "none") {
+        const canvas = captionCanvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (ctx) renderLiveCaptions(ctx, transcription.words, v.currentTime, captionStyle, canvas.width, canvas.height);
+      } else {
+        const canvas = captionCanvasRef.current;
+        if (canvas) { const ctx = canvas.getContext("2d"); ctx?.clearRect(0, 0, canvas.width, canvas.height); }
+      }
+    };
     const onEnded = () => setIsPlaying(false);
-
     v.addEventListener("timeupdate", onTimeUpdate);
     v.addEventListener("ended", onEnded);
-    return () => {
-      v.removeEventListener("timeupdate", onTimeUpdate);
-      v.removeEventListener("ended", onEnded);
-    };
-  }, [video.url]);
+    return () => { v.removeEventListener("timeupdate", onTimeUpdate); v.removeEventListener("ended", onEnded); };
+  }, [video.url, transcription, captionStyle, captionsEnabled]);
 
-  // === Waveform rendering ===
+  // Auto-scroll transcript
   useEffect(() => {
-    const canvas = waveformCanvasRef.current;
-    if (!canvas || waveformData.length === 0) return;
+    if (!transcriptBodyRef.current || !transcription) return;
+    const activeWord = transcriptBodyRef.current.querySelector(".transcript-word.active");
+    if (activeWord) activeWord.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [currentTime, transcription]);
 
-    canvas.width = canvas.offsetWidth * 2;
-    canvas.height = canvas.offsetHeight * 2;
-
-    const progress = video.duration > 0 ? currentTime / video.duration : 0;
-    const selStart =
-      video.duration > 0 ? trimStart / video.duration : undefined;
-    const selEnd = video.duration > 0 ? trimEnd / video.duration : undefined;
-
-    renderWaveform(canvas, waveformData, {
-      progress,
-      selectionStart: selStart,
-      selectionEnd: selEnd,
-    });
-  }, [waveformData, currentTime, trimStart, trimEnd, video.duration]);
-
-  // === Select clip ===
-  const selectClip = (clip: ClipSuggestion) => {
-    setSelectedClip(clip);
-    setTrimStart(clip.start);
-    setTrimEnd(clip.end);
-    if (videoRef.current) {
-      videoRef.current.currentTime = clip.start;
-    }
-  };
-
-  // === Export ===
-  const handleExport = async () => {
-    if (!video.file) return;
-
-    setStage("exporting");
-    setExportProgress(0);
-    setExportMessage("Starting export...");
-
+  const processVideo = useCallback(async (file: File, title?: string) => {
+    setError("");
     try {
-      // Generate captions if style is not none
-      let captionFile: string | undefined;
-      if (
-        captionStyle.id !== "none" &&
-        transcription &&
-        transcription.words.length > 0
-      ) {
-        const clipWords = transcription.words.filter(
-          (w) => w.start >= trimStart && w.end <= trimEnd
-        );
-        // Offset timestamps to start from 0
-        const offsetWords = clipWords.map((w) => ({
-          ...w,
-          start: w.start - trimStart,
-          end: w.end - trimStart,
-        }));
+      setStage("loading-ffmpeg");
+      setStageMessage("Loading video engine...");
+      const info = await getVideoInfo(file);
+      const thumb = await generateThumbnail(file, 1);
+      const url = URL.createObjectURL(file);
+      setVideo({ file, url, duration: info.duration, width: info.width, height: info.height, thumbnail: thumb, title: title || file.name.replace(/\.[^.]+$/, "") || "Untitled Clip" });
+      setTrimStart(0); setTrimEnd(info.duration);
 
-        const resMap = {
-          "9:16": { w: 1080, h: 1920 },
-          "1:1": { w: 1080, h: 1080 },
-          "16:9": { w: 1920, h: 1080 },
-        };
-        const res = resMap[aspectRatio];
-        captionFile = generateASSSubtitles(
-          offsetWords,
-          captionStyle,
-          res.w,
-          res.h
-        );
+      // Background thumbnails
+      const numThumbs = Math.min(60, Math.max(20, Math.floor(info.duration / 5)));
+      const thumbInterval = info.duration / numThumbs;
+      const thumbPromises: Promise<string>[] = [];
+      for (let t = 0; t < info.duration; t += thumbInterval) thumbPromises.push(generateThumbnail(file, t));
+      Promise.all(thumbPromises).then(thumbs => setThumbnails(thumbs.filter(t => t !== "")));
+
+      const onFFmpegProgress: ProgressCallback = (_p, msg) => setStageMessage(msg);
+      await loadFFmpeg(onFFmpegProgress);
+
+      setStage("extracting-audio");
+      setStageMessage("Extracting audio track...");
+      const audioBlob = await extractAudio(file, onFFmpegProgress);
+
+      try { const wf = await generateWaveform(audioBlob, 400); setWaveformData(wf); } catch {}
+
+      setStage("transcribing");
+      setStageMessage(info.duration > 600 ? "Transcribing with Whisper AI (long video — this may take a few minutes)..." : "Transcribing with Whisper AI...");
+
+      let transcriptResult: TranscriptionResult;
+      try {
+        transcriptResult = await transcribeAudio(audioBlob);
+        setTranscription(transcriptResult);
+      } catch (e) {
+        console.error("Transcription error:", e);
+        setStage("ready"); setStageMessage("");
+        showToast("Transcription failed — check your GROQ_API_KEY.", "error");
+        return;
       }
 
-      const options: ExportOptions = {
-        aspectRatio,
-        quality,
-        captionFile,
-        trimStart,
-        trimEnd,
-      };
+      setStage("analyzing");
+      setStageMessage("AI analyzing for viral clip potential...");
+      try {
+        const analysis = await analyzeTranscript(transcriptResult.segments, transcriptResult.words, info.duration);
+        setClips(analysis.clips); setSummary(analysis.summary);
+        const splitPoints = analysis.clips.flatMap(c => [c.start, c.end]);
+        setSplits([...new Set(splitPoints)].sort((a, b) => a - b));
+        if (analysis.clips.length > 0) {
+          const top = analysis.clips[0];
+          setSelectedClip(top); setTrimStart(top.start); setTrimEnd(top.end);
+          setVideo(v => ({ ...v, title: top.title }));
+        }
+      } catch (e) {
+        console.error("Analysis error:", e);
+        showToast("AI analysis failed — you can still edit manually.", "error");
+      }
 
-      const onProgress: ProgressCallback = (p, msg) => {
-        setExportProgress(p);
-        setExportMessage(msg);
-      };
+      setStage("ready"); setStageMessage("");
+      showToast("Video processed! ✅");
+      setSidebarTab("ai");
+    } catch (e) {
+      console.error("Processing error:", e);
+      setStage("error");
+      setError(e instanceof Error ? e.message : "Unknown error occurred");
+    }
+  }, [showToast]);
 
-      const blob = await exportClip(video.file, options, onProgress);
+  const handleYtDownload = useCallback(async () => {
+    if (!ytUrl.trim()) return;
+    const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|shorts\/|embed\/)|youtu\.be\/)/;
+    if (!ytRegex.test(ytUrl)) { showToast("Please enter a valid YouTube URL", "error"); return; }
+    setYtDownloading(true); setStage("downloading"); setStageMessage("Fetching video from YouTube...");
+    try {
+      const res = await fetch("/api/youtube-download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: ytUrl, proxyStream: true }),
+      });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error || "Download failed"); }
 
-      // Download
+      setStageMessage("Downloading video bytes...");
+      const blob = await res.blob();
+      const file = new File([blob], "youtube-video.mp4", { type: "video/mp4" });
+      setYtDownloading(false);
+      await processVideo(file, "YouTube Video");
+    } catch (e) {
+      console.error("YT download error:", e);
+      setYtDownloading(false); setStage("idle");
+      showToast(`YouTube download failed: ${e instanceof Error ? e.message : "Unknown error"}. Try uploading directly.`, "error");
+    }
+  }, [ytUrl, processVideo, showToast]);
+
+  const handleFileSelect = useCallback((files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    if (!file.type.startsWith("video/") && !file.name.match(/\.(mp4|webm|mov|avi|mkv)$/i)) {
+      showToast("Please upload a video file", "error"); return;
+    }
+    processVideo(file);
+  }, [processVideo, showToast]);
+
+  const togglePlay = useCallback(() => {
+    if (!videoRef.current) return;
+    if (isPlaying) { videoRef.current.pause(); } else { videoRef.current.play(); }
+    setIsPlaying(!isPlaying);
+  }, [isPlaying]);
+
+  const handleSeek = useCallback((time: number) => {
+    if (videoRef.current) videoRef.current.currentTime = time;
+    setCurrentTime(time);
+  }, []);
+
+  const selectClip = (clip: ClipSuggestion) => {
+    setSelectedClip(clip); setTrimStart(clip.start); setTrimEnd(clip.end);
+    setVideo(v => ({ ...v, title: clip.title }));
+    if (videoRef.current) videoRef.current.currentTime = clip.start;
+  };
+
+  const handleExport = async () => {
+    if (!video.file) return;
+    setStage("exporting"); setExportProgress(0); setExportMessage("Starting export...");
+    try {
+      let captionFile: string | undefined;
+      if (captionsEnabled && captionStyle.id !== "none" && transcription && transcription.words.length > 0) {
+        const clipWords = transcription.words.filter(w => w.start >= trimStart && w.end <= trimEnd);
+        const offsetWords = clipWords.map(w => ({ ...w, start: w.start - trimStart, end: w.end - trimStart }));
+        const resMap = { "9:16": { w: 1080, h: 1920 }, "1:1": { w: 1080, h: 1080 }, "16:9": { w: 1920, h: 1080 } };
+        const res = resMap[aspectRatio];
+        captionFile = generateASSSubtitles(offsetWords, captionStyle, res.w, res.h);
+      }
+      const options: ExportOptions = { aspectRatio, quality, captionFile, trimStart, trimEnd };
+      const blob = await exportClip(video.file, options, (p, msg) => { setExportProgress(p); setExportMessage(msg); });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `nogclip_${selectedClip?.title?.replace(/[^a-z0-9]/gi, "_").substring(0, 30) || "clip"}_${aspectRatio.replace(":", "x")}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      const a = document.createElement("a"); a.href = url;
+      a.download = `nogclip_${video.title.replace(/[^a-z0-9]/gi, "_").substring(0, 30)}_${aspectRatio.replace(":", "x")}.mp4`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
       URL.revokeObjectURL(url);
-
-      setStage("ready");
-      showToast("Export complete! Your clip has been downloaded. 🎬");
+      setStage("ready"); showToast("Export complete! 🎬");
     } catch (e) {
       console.error("Export error:", e);
-      setStage("ready");
-      showToast(
-        `Export failed: ${e instanceof Error ? e.message : "Unknown error"}`,
-        "error"
-      );
+      setStage("ready"); showToast(`Export failed: ${e instanceof Error ? e.message : "Unknown error"}`, "error");
     }
   };
 
-  // === Quick trim (editor mode) ===
   const handleQuickTrim = async () => {
     if (!video.file) return;
-    setStage("exporting");
-    setExportMessage("Trimming video...");
-    setExportProgress(0);
-
+    setStage("exporting"); setExportMessage("Trimming..."); setExportProgress(0);
     try {
-      const blob = await trimVideo(
-        video.file,
-        trimStart,
-        trimEnd,
-        (p, msg) => {
-          setExportProgress(p);
-          setExportMessage(msg);
-        }
-      );
+      const blob = await trimVideo(video.file, trimStart, trimEnd, (p, msg) => { setExportProgress(p); setExportMessage(msg); });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `nogclip_trim_${formatTime(trimStart)}-${formatTime(trimEnd)}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      const a = document.createElement("a"); a.href = url;
+      a.download = `nogclip_trim.mp4`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      setStage("ready");
-      showToast("Trim complete! Downloaded. ✂️");
-    } catch (e) {
-      setStage("ready");
-      showToast("Trim failed", "error");
-      console.error(e);
-    }
+      setStage("ready"); showToast("Trim downloaded ✂️");
+    } catch { setStage("ready"); showToast("Trim failed", "error"); }
   };
 
-  // === New video ===
   const handleNewVideo = () => {
     if (video.url) URL.revokeObjectURL(video.url);
-    setVideo({
-      file: null,
-      url: "",
-      duration: 0,
-      width: 0,
-      height: 0,
-      thumbnail: "",
-    });
-    setStage("idle");
-    setTranscription(null);
-    setClips([]);
-    setSelectedClip(null);
-    setSummary("");
-    setWaveformData([]);
-    setCurrentTime(0);
-    setTrimStart(0);
-    setTrimEnd(0);
-    setIsPlaying(false);
-    setError("");
+    setVideo({ file: null, url: "", duration: 0, width: 0, height: 0, thumbnail: "", title: "Untitled Clip" });
+    setStage("idle"); setTranscription(null); setClips([]); setSelectedClip(null);
+    setSummary(""); setWaveformData([]); setThumbnails([]); setSplits([]);
+    setCurrentTime(0); setTrimStart(0); setTrimEnd(0); setIsPlaying(false);
+    setError(""); setYtUrl(""); setSidebarTab("ai");
   };
 
-  // === Waveform click ===
-  const handleWaveformClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = waveformCanvasRef.current;
-    if (!canvas || !videoRef.current) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const time = x * video.duration;
-    videoRef.current.currentTime = time;
-    setCurrentTime(time);
+  const isKeyword = (word: string): "bold"|"highlight"|null => {
+    const w = word.toLowerCase().replace(/[^a-z]/g, "");
+    if (STRONG_WORDS.has(w)) return "highlight";
+    if (HIGHLIGHT_KEYWORDS.has(w)) return "bold";
+    return null;
   };
 
-  // === Processing stages ===
-  const stages: {
-    key: ProcessingStage;
-    label: string;
-    desc: string;
-  }[] = [
-    {
-      key: "loading-ffmpeg",
-      label: "Loading Engine",
-      desc: "Initializing FFmpeg in your browser",
-    },
-    {
-      key: "extracting-audio",
-      label: "Extracting Audio",
-      desc: "Pulling audio track from video",
-    },
-    {
-      key: "transcribing",
-      label: "Transcribing",
-      desc: "Whisper AI converting speech to text",
-    },
-    {
-      key: "analyzing",
-      label: "AI Analysis",
-      desc: "Finding the best clip moments",
-    },
+  const stages = [
+    { key: "downloading" as ProcessingStage, label: "Downloading", desc: "Fetching from YouTube" },
+    { key: "loading-ffmpeg" as ProcessingStage, label: "Loading Engine", desc: "Initializing FFmpeg" },
+    { key: "extracting-audio" as ProcessingStage, label: "Extracting Audio", desc: "Pulling audio track" },
+    { key: "transcribing" as ProcessingStage, label: "Transcribing", desc: "Whisper AI speech-to-text" },
+    { key: "analyzing" as ProcessingStage, label: "AI Analysis", desc: "Finding best clips" },
   ];
 
-  const getStageStatus = (
-    stageKey: ProcessingStage
-  ): "pending" | "active" | "done" | "error" => {
-    const order: ProcessingStage[] = [
-      "loading-ffmpeg",
-      "extracting-audio",
-      "transcribing",
-      "analyzing",
-    ];
-    const currentIdx = order.indexOf(stage);
-    const stageIdx = order.indexOf(stageKey);
-
-    if (stage === "error") return stageIdx <= currentIdx ? "error" : "pending";
+  const getStageStatus = (key: ProcessingStage): "pending"|"active"|"done"|"error" => {
+    const order: ProcessingStage[] = ["downloading","loading-ffmpeg","extracting-audio","transcribing","analyzing"];
+    const ci = order.indexOf(stage); const si = order.indexOf(key);
+    if (stage === "error") return si <= ci ? "error" : "pending";
     if (stage === "ready" || stage === "exporting") return "done";
-    if (stageIdx < currentIdx) return "done";
-    if (stageIdx === currentIdx) return "active";
+    if (si < ci) return "done";
+    if (si === ci) return "active";
     return "pending";
   };
+  const icons: Record<string, string> = { pending: "○", active: "◉", done: "✓", error: "✗" };
 
-  const stageIcons: Record<string, string> = {
-    pending: "○",
-    active: "◉",
-    done: "✓",
-    error: "✗",
-  };
-
-  // ============================================
-  // RENDER
-  // ============================================
-
-  // Upload screen
+  // ── UPLOAD SCREEN ──
   if (stage === "idle" || (stage !== "ready" && stage !== "exporting" && !video.url)) {
     return (
       <div className="studio">
-        <Header />
+        <div className="editor-topbar">
+          <Link href="/" className="topbar-back">←</Link>
+          <span className="topbar-title">nogclip Studio</span>
+          <div style={{ flex: 1 }} />
+          <div className="topbar-right">
+            <Link href="/" className="topbar-save-btn">Home</Link>
+          </div>
+        </div>
+
         <section className="upload-section">
           <div className="upload-container">
-            <div
-              ref={dropZoneRef}
-              className={`upload-zone ${isDragOver ? "drag-over" : ""}`}
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-            >
-              <span className="upload-icon">🎬</span>
-              <h2 className="upload-title">
-                Drop your video here
-              </h2>
-              <p className="upload-subtitle">
-                or click to browse · AI will find the best clips automatically
-              </p>
-              <div className="upload-formats">
-                {["MP4", "MOV", "WebM", "AVI", "MKV"].map((fmt) => (
-                  <span key={fmt} className="upload-format-tag">
-                    .{fmt.toLowerCase()}
-                  </span>
-                ))}
+            <div style={{ textAlign: "center", marginBottom: 8 }}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: "#e2e8f0", letterSpacing: -0.5 }}>
+                Drop a video or paste a YouTube link
               </div>
-              <input
-                ref={fileInputRef}
-                className="upload-input"
-                type="file"
-                accept="video/*"
-                onChange={(e) => handleFileSelect(e.target.files)}
-              />
+              <div style={{ fontSize: 13, color: "#4b5563", marginTop: 4 }}>
+                AI finds the best clips, adds captions, scores virality — in minutes
+              </div>
             </div>
 
-            {/* Processing status */}
+            <div className="yt-input-wrap">
+              <div className="yt-input-group">
+                <input className="yt-input" type="text" placeholder="https://youtube.com/watch?v=..." value={ytUrl}
+                  onChange={e => setYtUrl(e.target.value)} onKeyDown={e => e.key === "Enter" && handleYtDownload()}
+                  disabled={ytDownloading} />
+                <button className="yt-submit-btn" onClick={handleYtDownload} disabled={ytDownloading || !ytUrl.trim()}>
+                  {ytDownloading ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Downloading...</> : <>▶ Go</>}
+                </button>
+              </div>
+            </div>
+
+            <div className="yt-or-divider">or upload a file</div>
+
+            <div ref={undefined} className={`upload-zone ${isDragOver ? "drag-over" : ""}`}
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={e => { e.preventDefault(); setIsDragOver(true); }}
+              onDragLeave={() => setIsDragOver(false)}
+              onDrop={e => { e.preventDefault(); setIsDragOver(false); handleFileSelect(e.dataTransfer.files); }}>
+              <span className="upload-icon">🎬</span>
+              <h2 className="upload-title">Drop your video here</h2>
+              <p className="upload-subtitle">Supports MP4, MOV, WebM, AVI, MKV · Any length</p>
+              <div className="upload-formats">
+                {["MP4","MOV","WebM","AVI","MKV"].map(fmt => <span key={fmt} className="upload-format-tag">.{fmt.toLowerCase()}</span>)}
+              </div>
+              <input ref={fileInputRef} className="upload-input" type="file" accept="video/*" onChange={e => handleFileSelect(e.target.files)} />
+            </div>
+
             {stage !== "idle" && (
               <div className="processing-status">
-                {stages.map((s) => {
-                  const status = getStageStatus(s.key);
-                  return (
-                    <div key={s.key} className="processing-step">
-                      <div
-                        className={`processing-step-icon ${status}`}
-                      >
-                        {status === "active" ? (
-                          <span className="spinner" style={{ width: 18, height: 18, borderWidth: 2 }}></span>
-                        ) : (
-                          stageIcons[status]
-                        )}
-                      </div>
-                      <div className="processing-step-text">
-                        <div className="processing-step-title">
-                          {s.label}
+                {stages.filter(s => { if (s.key === "downloading" && !ytDownloading && stage !== "downloading") return false; return true; })
+                  .map(s => {
+                    const status = getStageStatus(s.key);
+                    return (
+                      <div key={s.key} className="processing-step">
+                        <div className={`processing-step-icon ${status}`}>
+                          {status === "active" ? <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> : icons[status]}
                         </div>
-                        <div className="processing-step-desc">
-                          {status === "active"
-                            ? stageMessage || s.desc
-                            : s.desc}
+                        <div className="processing-step-text">
+                          <div className="processing-step-title">{s.label}</div>
+                          <div className="processing-step-desc">{status === "active" ? stageMessage || s.desc : s.desc}</div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
-
+                    );
+                  })}
                 {stage === "error" && (
-                  <div style={{ marginTop: 16 }}>
-                    <p
-                      style={{
-                        color: "var(--accent-danger)",
-                        fontSize: "var(--text-sm)",
-                        marginBottom: 12,
-                      }}
-                    >
-                      ❌ {error}
-                    </p>
-                    <button
-                      className="btn btn-secondary"
-                      onClick={handleNewVideo}
-                    >
-                      Try Again
-                    </button>
+                  <div style={{ marginTop: 8 }}>
+                    <p style={{ color: "#ef4444", fontSize: 13, marginBottom: 10 }}>❌ {error}</p>
+                    <button className="btn btn-secondary" onClick={handleNewVideo}>Try Again</button>
                   </div>
                 )}
               </div>
@@ -627,287 +412,107 @@ export default function StudioPage() {
     );
   }
 
-  // === Workspace ===
+  // ── EDITOR ──
+  const sidebarOpen = sidebarTab !== null;
+
   return (
     <div className="studio">
-      <Header />
+      {/* Top Bar */}
+      <div className="editor-topbar">
+        <button className="topbar-back" onClick={handleNewVideo}>←</button>
+        <span className="topbar-title">{video.title}</span>
 
-      {/* Editor toolbar */}
-      <div className="editor-tools">
-        <button className="editor-tool-btn" onClick={handleNewVideo}>
-          📁 New Video
-        </button>
-        <div className="editor-divider" />
-        <button className="editor-tool-btn" onClick={handleQuickTrim}>
-          ✂️ Quick Trim
-        </button>
-        <button
-          className="editor-tool-btn"
-          onClick={() => {
-            if (videoRef.current) {
-              setTrimStart(currentTime);
-            }
-          }}
-        >
-          ◀ Set Start
-        </button>
-        <button
-          className="editor-tool-btn"
-          onClick={() => {
-            if (videoRef.current) {
-              setTrimEnd(currentTime);
-            }
-          }}
-        >
-          Set End ▶
-        </button>
-        <div className="editor-divider" />
-        <span
-          style={{
-            fontSize: "var(--text-xs)",
-            color: "var(--text-tertiary)",
-            fontFamily: "var(--font-mono)",
-          }}
-        >
-          Trim: {formatTime(trimStart)} → {formatTime(trimEnd)} (
-          {formatTime(trimEnd - trimStart)})
-        </span>
-      </div>
-
-      <div className="workspace">
-        {/* LEFT PANEL — Clips / Editor */}
-        <div className="panel-left">
-          <div className="panel-tabs">
-            <button
-              className={`panel-tab ${leftTab === "clips" ? "active" : ""}`}
-              onClick={() => setLeftTab("clips")}
-            >
-              🤖 AI Clips
+        <div className="topbar-center">
+          {(["9:16","1:1","16:9"] as const).map(r => (
+            <button key={r} className={`topbar-control ${aspectRatio === r ? "active" : ""}`} onClick={() => setAspectRatio(r)}>
+              {r === "9:16" ? "📱" : r === "1:1" ? "⬛" : "🖥"} {r}
             </button>
-            <button
-              className={`panel-tab ${leftTab === "editor" ? "active" : ""}`}
-              onClick={() => setLeftTab("editor")}
-            >
-              ✏️ Editor
-            </button>
-          </div>
-
-          {leftTab === "clips" ? (
-            <>
-              <div className="panel-header">
-                <span className="panel-title">Suggested Clips</span>
-                <span className="panel-count">{clips.length}</span>
-              </div>
-              <div className="clips-list">
-                {clips.length === 0 && (
-                  <div
-                    style={{
-                      padding: "var(--space-8)",
-                      textAlign: "center",
-                      color: "var(--text-tertiary)",
-                    }}
-                  >
-                    <p>No clips found yet.</p>
-                    <p
-                      style={{
-                        fontSize: "var(--text-xs)",
-                        marginTop: "var(--space-2)",
-                      }}
-                    >
-                      AI analysis may have failed. You can still edit manually using
-                      the Editor tab.
-                    </p>
-                  </div>
-                )}
-                {clips.map((clip) => (
-                  <div
-                    key={clip.id}
-                    className={`clip-card ${selectedClip?.id === clip.id ? "active" : ""}`}
-                    onClick={() => selectClip(clip)}
-                  >
-                    <div className="clip-card-header">
-                      <span className="clip-card-title">{clip.title}</span>
-                      <span
-                        className="clip-card-score"
-                        style={{
-                          background: `${getViralityColor(clip.viralityScore)}22`,
-                          color: getViralityColor(clip.viralityScore),
-                          border: `1px solid ${getViralityColor(clip.viralityScore)}44`,
-                        }}
-                      >
-                        {clip.viralityScore}
-                      </span>
-                    </div>
-                    <div className="clip-card-time">
-                      {formatTime(clip.start)} → {formatTime(clip.end)} •{" "}
-                      {formatTime(clip.end - clip.start)}
-                    </div>
-                    <div className="clip-card-reason">{clip.reason}</div>
-                    <div
-                      style={{
-                        marginTop: "var(--space-2)",
-                        fontSize: "11px",
-                      }}
-                    >
-                      {getViralityLabel(clip.viralityScore)} •{" "}
-                      Hook: {clip.hookStrength}
-                    </div>
-                  </div>
-                ))}
-
-                {summary && (
-                  <div
-                    style={{
-                      padding: "var(--space-4)",
-                      background: "var(--bg-tertiary)",
-                      borderRadius: "var(--border-radius-md)",
-                      fontSize: "var(--text-xs)",
-                      color: "var(--text-secondary)",
-                      lineHeight: 1.6,
-                    }}
-                  >
-                    <strong>AI Summary:</strong> {summary}
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            /* Editor Tab */
-            <div className="clips-list">
-              <div className="tool-section">
-                <div className="tool-section-header">✂️ Trim & Cut</div>
-                <div className="tool-section-body">
-                  <div className="trim-controls">
-                    <div className="trim-row">
-                      <span className="trim-label">Start</span>
-                      <input
-                        type="number"
-                        className="trim-input"
-                        value={trimStart.toFixed(1)}
-                        onChange={(e) =>
-                          setTrimStart(parseFloat(e.target.value) || 0)
-                        }
-                        step="0.1"
-                        min="0"
-                        max={video.duration}
-                      />
-                    </div>
-                    <div className="trim-row">
-                      <span className="trim-label">End</span>
-                      <input
-                        type="number"
-                        className="trim-input"
-                        value={trimEnd.toFixed(1)}
-                        onChange={(e) =>
-                          setTrimEnd(parseFloat(e.target.value) || 0)
-                        }
-                        step="0.1"
-                        min="0"
-                        max={video.duration}
-                      />
-                    </div>
-                    <div className="trim-row">
-                      <span className="trim-label">Length</span>
-                      <span
-                        style={{
-                          fontFamily: "var(--font-mono)",
-                          fontSize: "var(--text-sm)",
-                          color: "var(--text-secondary)",
-                        }}
-                      >
-                        {formatTime(Math.max(0, trimEnd - trimStart))}
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: "var(--space-2)",
-                        marginTop: "var(--space-2)",
-                      }}
-                    >
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        style={{ flex: 1 }}
-                        onClick={() => {
-                          setTrimStart(0);
-                          setTrimEnd(video.duration);
-                        }}
-                      >
-                        Reset
-                      </button>
-                      <button
-                        className="btn btn-primary btn-sm"
-                        style={{ flex: 1 }}
-                        onClick={handleQuickTrim}
-                      >
-                        ✂️ Trim & Download
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Transcript viewer */}
-              {transcription && (
-                <div className="tool-section">
-                  <div className="tool-section-header">📝 Transcript</div>
-                  <div
-                    className="tool-section-body"
-                    style={{ maxHeight: 300, overflowY: "auto" }}
-                  >
-                    {transcription.segments.map((seg, i) => (
-                      <div
-                        key={i}
-                        style={{
-                          padding: "var(--space-2) 0",
-                          borderBottom: "1px solid var(--border-subtle)",
-                          cursor: "pointer",
-                          fontSize: "var(--text-xs)",
-                          lineHeight: 1.6,
-                          opacity:
-                            currentTime >= seg.start && currentTime <= seg.end
-                              ? 1
-                              : 0.6,
-                          color:
-                            currentTime >= seg.start && currentTime <= seg.end
-                              ? "var(--accent-primary-hover)"
-                              : "var(--text-secondary)",
-                        }}
-                        onClick={() => {
-                          if (videoRef.current) {
-                            videoRef.current.currentTime = seg.start;
-                          }
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontFamily: "var(--font-mono)",
-                            color: "var(--text-tertiary)",
-                            marginRight: "var(--space-2)",
-                          }}
-                        >
-                          {formatTime(seg.start)}
-                        </span>
-                        {seg.text}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          ))}
+          <button className="topbar-control" onClick={() => {
+            const layouts = ["fill","fit","split","three","four","screenshare","gameplay"];
+            const idx = layouts.indexOf(layout);
+            setLayout(layouts[(idx + 1) % layouts.length]);
+          }}>
+            <span className="topbar-control-label">Layout:</span>
+            {layout.charAt(0).toUpperCase() + layout.slice(1)}
+          </button>
+          <button className={`topbar-control ${captionsEnabled ? "active" : ""}`} onClick={() => setCaptionsEnabled(!captionsEnabled)}>
+            <span className="topbar-control-label">Captions:</span>
+            {captionsEnabled ? "ON" : "OFF"}
+          </button>
         </div>
 
-        {/* CENTER PANEL — Preview */}
+        <div className="topbar-right">
+          <div className="topbar-lightning">⚡ {clips.length > 0 ? clips.length : 0}</div>
+          <button className="topbar-icon-btn" title="Undo">↩</button>
+          <button className="topbar-icon-btn" title="Redo">↪</button>
+          <button className="topbar-save-btn" onClick={handleQuickTrim}>Save changes</button>
+          <button className="topbar-export-btn" onClick={handleExport} disabled={stage === "exporting"}>
+            {stage === "exporting" ? `${exportProgress}%` : "Export"}
+          </button>
+        </div>
+      </div>
+
+      <div className={`workspace ${sidebarOpen ? "sidebar-expanded" : ""}`}>
+        {/* LEFT — Transcript */}
+        <div className="panel-left">
+          <div className="transcript-header">
+            <label className="transcript-toggle">
+              <input type="checkbox" defaultChecked />
+              Transcript only
+            </label>
+            <button className="transcript-add-section">+ Add a section</button>
+          </div>
+          <div className="transcript-body" ref={transcriptBodyRef}>
+            {transcription ? (
+              transcription.words.map((word, i) => {
+                const isActive = currentTime >= word.start && currentTime <= word.end + 0.1;
+                const kwType = isKeyword(word.word);
+                const showSep = i > 0 && word.start - transcription.words[i - 1].end > 1.5;
+                return (
+                  <span key={i}>
+                    {showSep && <span className="transcript-separator">• • •</span>}
+                    <span
+                      className={`transcript-word ${isActive ? "active" : ""} ${kwType === "bold" ? "bold-keyword" : ""} ${kwType === "highlight" ? "highlight" : ""}`}
+                      onClick={() => { if (videoRef.current) { videoRef.current.currentTime = word.start; setCurrentTime(word.start); } }}>
+                      {word.word}
+                    </span>{" "}
+                  </span>
+                );
+              })
+            ) : (
+              <div style={{ textAlign: "center", color: "#1e293b", padding: "40px 20px" }}>
+                <p style={{ fontSize: 32, marginBottom: 12 }}>📝</p>
+                <p style={{ fontSize: 13 }}>Transcript will appear here once your video is processed.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* CENTER — Video */}
         <div className="panel-center">
+          <div className="preview-topbar">
+            <div className="preview-badge active">
+              <span className="preview-badge-dot" />
+              {aspectRatio}
+            </div>
+            <div className="preview-badge">
+              Layout: {layout.charAt(0).toUpperCase() + layout.slice(1)}
+            </div>
+            {selectedClip && (
+              <div className="preview-badge" style={{ background: `${getViralityColor(selectedClip.viralityScore)}18`, borderColor: `${getViralityColor(selectedClip.viralityScore)}40`, color: getViralityColor(selectedClip.viralityScore) }}>
+                Score: {selectedClip.viralityScore}/100
+              </div>
+            )}
+          </div>
+
           <div className="preview-container">
             {video.url ? (
-              <video
-                ref={videoRef}
-                src={video.url}
-                className={`preview-video ratio-${aspectRatio.replace(":", "-")}`}
-                onClick={togglePlay}
-              />
+              <div className="preview-wrapper">
+                <video ref={videoRef} src={video.url} className={`preview-video ratio-${aspectRatio.replace(":", "-")}`} onClick={togglePlay} playsInline />
+                <canvas ref={captionCanvasRef} className="caption-overlay" />
+                <div className="play-btn-overlay">{isPlaying ? "⏸" : "▶"}</div>
+              </div>
             ) : (
               <div className="preview-empty">
                 <div className="preview-empty-icon">🎬</div>
@@ -915,173 +520,259 @@ export default function StudioPage() {
               </div>
             )}
           </div>
-
-          {/* Video controls */}
-          <div className="video-controls">
-            <button className="play-btn" onClick={togglePlay}>
-              {isPlaying ? "⏸" : "▶"}
-            </button>
-            <span className="video-time">
-              {formatTime(currentTime)} / {formatTime(video.duration)}
-            </span>
-            <input
-              type="range"
-              className="video-seek"
-              min="0"
-              max={video.duration || 1}
-              step="0.1"
-              value={currentTime}
-              onChange={handleSeek}
-            />
-          </div>
         </div>
 
-        {/* RIGHT PANEL — Tools */}
+        {/* RIGHT — Sidebar */}
         <div className="panel-right">
-          <div className="panel-header">
-            <span className="panel-title">Settings</span>
-          </div>
-          <div className="tools-scroll">
-            {/* Aspect Ratio */}
-            <div className="tool-section">
-              <div className="tool-section-header">📐 Aspect Ratio</div>
-              <div className="tool-section-body">
-                <div className="ratio-options">
-                  {(["9:16", "1:1", "16:9"] as const).map((r) => (
-                    <button
-                      key={r}
-                      className={`ratio-option ${aspectRatio === r ? "active" : ""}`}
-                      onClick={() => setAspectRatio(r)}
-                    >
-                      <div
-                        className={`ratio-preview r-${r.replace(":", "-")}`}
-                      />
-                      {r}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Caption Style */}
-            <div className="tool-section">
-              <div className="tool-section-header">💬 Captions</div>
-              <div className="tool-section-body">
-                <div className="caption-options">
-                  {CAPTION_PRESETS.map((preset) => (
-                    <button
-                      key={preset.id}
-                      className={`caption-option ${captionStyle.id === preset.id ? "active" : ""}`}
-                      onClick={() => setCaptionStyle(preset)}
-                    >
-                      <div className="caption-option-preview">
-                        {preset.id === "bold-pop"
-                          ? "Aa"
-                          : preset.id === "karaoke"
-                            ? "🎤"
-                            : preset.id === "typewriter"
-                              ? "⌨️"
-                              : preset.id === "minimal"
-                                ? "—"
-                                : "⊘"}
+          {sidebarOpen && (
+            <div className="sidebar-panel">
+              {/* AI Clips */}
+              {sidebarTab === "ai" && (
+                <>
+                  <div className="sidebar-panel-title">AI Clips {clips.length > 0 && `(${clips.length})`}</div>
+                  <div className="clips-list">
+                    {clips.length === 0 ? (
+                      <div style={{ textAlign: "center", color: "#334155", padding: "20px 0" }}>
+                        <p style={{ fontSize: 32, marginBottom: 8 }}>🤖</p>
+                        <p style={{ fontSize: 13 }}>No clips found yet.</p>
+                        <p style={{ fontSize: 11, marginTop: 4, color: "#1e293b" }}>AI analysis may be pending or failed.</p>
                       </div>
-                      {preset.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
+                    ) : clips.map(clip => (
+                      <div key={clip.id} className={`clip-card ${selectedClip?.id === clip.id ? "active" : ""}`}>
+                        <div className="clip-card-header">
+                          <span className="clip-card-title">{clip.title}</span>
+                          <span className="clip-card-score" style={{ background: `${getViralityColor(clip.viralityScore)}18`, color: getViralityColor(clip.viralityScore), border: `1px solid ${getViralityColor(clip.viralityScore)}44` }}>
+                            {clip.viralityScore}
+                          </span>
+                        </div>
+                        <div className="clip-card-time">{formatTime(clip.start)} → {formatTime(clip.end)} · {formatTime(clip.end - clip.start)}</div>
+                        <div className="clip-card-reason">{clip.reason}</div>
+                        <div style={{ marginTop: 5, display: "flex", alignItems: "center", gap: 6 }}>
+                          <span className={`hook-badge ${clip.hookStrength}`}>
+                            {clip.hookStrength === "strong" ? "🔥" : clip.hookStrength === "medium" ? "⚡" : "📉"} Hook: {clip.hookStrength}
+                          </span>
+                          {clip.emotionalPeak && <span className="hook-badge strong">💥 Peak</span>}
+                        </div>
+                        <div className="clip-card-actions">
+                          <button className="clip-action-btn primary" onClick={() => selectClip(clip)}>▶ Open in Editor</button>
+                          <button className="clip-action-btn" onClick={async () => {
+                            if (!video.file) return;
+                            selectClip(clip);
+                            showToast("Exporting clip...");
+                            const blob = await exportClip(video.file, { aspectRatio, quality, trimStart: clip.start, trimEnd: clip.end }, () => {});
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a"); a.href = url; a.download = `${clip.title.replace(/[^a-z0-9]/gi,"_")}.mp4`;
+                            document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                          }}>⬇ Export</button>
+                        </div>
+                      </div>
+                    ))}
+                    {summary && (
+                      <div style={{ padding: 12, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 8, fontSize: 11, color: "#4b5563", lineHeight: 1.6 }}>
+                        <strong style={{ color: "#64748b" }}>AI Summary:</strong> {summary}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* Captions */}
+              {sidebarTab === "captions" && (
+                <>
+                  <div className="sidebar-panel-title">Captions</div>
+                  <div className="tool-section">
+                    <div className="tool-section-header">Style Preset</div>
+                    <div className="tool-section-body">
+                      <div className="caption-options">
+                        {CAPTION_PRESETS.map(preset => (
+                          <button key={preset.id} className={`caption-option ${captionStyle.id === preset.id ? "active" : ""}`} onClick={() => setCaptionStyle(preset)}>
+                            <div className="caption-option-preview" style={{ fontFamily: preset.fontFamily, color: preset.primaryColor }}>Aa</div>
+                            {preset.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="tool-section">
+                    <div className="tool-section-header">Font</div>
+                    <div className="tool-section-body">
+                      <div className="font-controls">
+                        <select className="font-select" value={captionStyle.fontFamily} onChange={e => { loadGoogleFont(e.target.value); setCaptionStyle({ ...captionStyle, fontFamily: e.target.value }); }}>
+                          {GOOGLE_FONTS.map(f => <option key={f} value={f}>{f}</option>)}
+                        </select>
+                        <div className="font-size-control">
+                          <label>Size</label>
+                          <input type="range" className="font-size-slider" min="20" max="80" value={captionStyle.fontSize} onChange={e => setCaptionStyle({ ...captionStyle, fontSize: parseInt(e.target.value) })} />
+                          <span className="font-size-value">{captionStyle.fontSize}px</span>
+                        </div>
+                        <div className="font-style-toggles">
+                          <button className={`font-style-btn ${parseInt(captionStyle.fontWeight) >= 700 ? "active" : ""}`} onClick={() => setCaptionStyle({ ...captionStyle, fontWeight: parseInt(captionStyle.fontWeight) >= 700 ? "400" : "800" })}><strong>B</strong></button>
+                          <button className={`font-style-btn ${captionStyle.italic ? "active" : ""}`} onClick={() => setCaptionStyle({ ...captionStyle, italic: !captionStyle.italic })}><em>I</em></button>
+                        </div>
+                        <div className="color-picker-row">
+                          <label>Text</label>
+                          <input type="color" className="color-picker-input" value={captionStyle.primaryColor} onChange={e => setCaptionStyle({ ...captionStyle, primaryColor: e.target.value })} />
+                          <label>Highlight</label>
+                          <input type="color" className="color-picker-input" value={captionStyle.highlightColor} onChange={e => setCaptionStyle({ ...captionStyle, highlightColor: e.target.value })} />
+                        </div>
+                        <div className="color-picker-row">
+                          <label>Outline</label>
+                          <input type="color" className="color-picker-input" value={captionStyle.outlineColor} onChange={e => setCaptionStyle({ ...captionStyle, outlineColor: e.target.value })} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, color: "#4b5563", marginBottom: 6, display: "block" }}>Position</label>
+                          <div className="position-options">
+                            {(["top","center","bottom"] as const).map(pos => (
+                              <button key={pos} className={`position-option ${captionStyle.position === pos ? "active" : ""}`} onClick={() => setCaptionStyle({ ...captionStyle, position: pos })}>
+                                {pos.charAt(0).toUpperCase() + pos.slice(1)}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Media */}
+              {sidebarTab === "media" && (
+                <>
+                  <div className="sidebar-panel-title">Media & Layout</div>
+                  <div className="tool-section">
+                    <div className="tool-section-header">Aspect Ratio</div>
+                    <div className="tool-section-body">
+                      <div className="ratio-options">
+                        {(["9:16","1:1","16:9"] as const).map(r => (
+                          <button key={r} className={`ratio-option ${aspectRatio === r ? "active" : ""}`} onClick={() => setAspectRatio(r)}>
+                            <div className={`ratio-preview r-${r.replace(":","- ")}`} style={{ width: r === "9:16" ? 14 : r === "1:1" ? 18 : 28, height: r === "9:16" ? 24 : r === "1:1" ? 18 : 16, border: "1.5px solid currentColor", borderRadius: 2 }} />
+                            {r}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="tool-section">
+                    <div className="tool-section-header">Speaker Layout</div>
+                    <div className="tool-section-body">
+                      <div className="layout-options">
+                        {LAYOUT_DEFS.map(l => (
+                          <button key={l.id} className={`layout-option ${layout === l.id ? "active" : ""}`} onClick={() => setLayout(l.id)}>
+                            {l.icon}
+                            {l.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="tool-section">
+                    <div className="tool-section-header">Export Quality</div>
+                    <div className="tool-section-body">
+                      <div className="export-quality">
+                        {(["720p","1080p"] as const).map(q => (
+                          <button key={q} className={`quality-option ${quality === q ? "active" : ""}`} onClick={() => setQuality(q)}>{q}</button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {sidebarTab === "brand" && (
+                <><div className="sidebar-panel-title">Brand Template</div>
+                <div style={{ color: "#334155", fontSize: 13, textAlign: "center", padding: "30px 20px" }}>
+                  <p style={{ fontSize: 28, marginBottom: 8 }}>🎨</p><p>Brand templates coming soon.</p>
+                </div></>
+              )}
+              {sidebarTab === "broll" && (
+                <><div className="sidebar-panel-title">B-Roll</div>
+                <div style={{ color: "#334155", fontSize: 13, textAlign: "center", padding: "30px 20px" }}>
+                  <p style={{ fontSize: 28, marginBottom: 8 }}>🎬</p><p>B-Roll overlay coming soon.</p>
+                </div></>
+              )}
+              {sidebarTab === "transitions" && (
+                <><div className="sidebar-panel-title">Transitions</div>
+                <div style={{ color: "#334155", fontSize: 13, textAlign: "center", padding: "30px 20px" }}>
+                  <p style={{ fontSize: 28, marginBottom: 8 }}>↗️</p><p>Transitions coming soon.</p>
+                </div></>
+              )}
+              {sidebarTab === "text" && (
+                <><div className="sidebar-panel-title">Text Overlay</div>
+                <div style={{ color: "#334155", fontSize: 13, textAlign: "center", padding: "30px 20px" }}>
+                  <p style={{ fontSize: 28, marginBottom: 8 }}>T</p><p>Text overlays coming soon.</p>
+                </div></>
+              )}
+              {sidebarTab === "music" && (
+                <><div className="sidebar-panel-title">Background Music</div>
+                <div style={{ color: "#334155", fontSize: 13, textAlign: "center", padding: "30px 20px" }}>
+                  <p style={{ fontSize: 28, marginBottom: 8 }}>🎵</p><p>Music library coming soon.</p>
+                </div></>
+              )}
             </div>
-          </div>
+          )}
 
-          {/* Export */}
-          <div className="export-section">
-            <div className="export-quality">
-              {(["720p", "1080p"] as const).map((q) => (
-                <button
-                  key={q}
-                  className={`quality-option ${quality === q ? "active" : ""}`}
-                  onClick={() => setQuality(q)}
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
-
-            <button
-              className="btn btn-primary export-btn"
-              onClick={handleExport}
-              disabled={stage === "exporting"}
-            >
-              {stage === "exporting"
-                ? `Exporting ${exportProgress}%...`
-                : "⬇️ Export Clip (No Watermark)"}
-            </button>
-
-            {stage === "exporting" && (
-              <div className="export-progress">
-                <div className="progress-bar">
-                  <div
-                    className="progress-bar-fill"
-                    style={{ width: `${exportProgress}%` }}
-                  />
-                </div>
-                <div className="export-progress-text">{exportMessage}</div>
-              </div>
-            )}
+          <div className="sidebar-icons">
+            {([
+              { id: "ai" as SidebarTab, icon: "✨", label: "AI" },
+              { id: "captions" as SidebarTab, icon: "💬", label: "Captions" },
+              { id: "media" as SidebarTab, icon: "📐", label: "Media" },
+              { id: "brand" as SidebarTab, icon: "🎨", label: "Brand" },
+              { id: "broll" as SidebarTab, icon: "✂️", label: "B-Roll" },
+              { id: "transitions" as SidebarTab, icon: "↗️", label: "Trans." },
+              { id: "text" as SidebarTab, icon: "T", label: "Text" },
+              { id: "music" as SidebarTab, icon: "🎵", label: "Music" },
+            ]).map(tab => (
+              <button key={tab.id} className={`sidebar-icon-btn ${sidebarTab === tab.id ? "active" : ""}`}
+                onClick={() => setSidebarTab(sidebarTab === tab.id ? null : tab.id)} title={tab.label}>
+                {tab.icon}
+                <span>{tab.label}</span>
+              </button>
+            ))}
           </div>
         </div>
 
         {/* TIMELINE */}
         <div className="timeline-section">
-          <div className="timeline-header">
-            <span className="timeline-title">Timeline</span>
-            <span className="timeline-title">
-              {formatTime(trimStart)} — {formatTime(trimEnd)}
-            </span>
-          </div>
-          <canvas
-            ref={waveformCanvasRef}
-            className="timeline-canvas"
-            onClick={handleWaveformClick}
+          <Timeline
+            duration={video.duration} currentTime={currentTime}
+            trimStart={trimStart} trimEnd={trimEnd}
+            isPlaying={isPlaying} waveformData={waveformData}
+            thumbnails={thumbnails} clipTitle={video.title}
+            splits={splits} videoRef={videoRef}
+            onSeek={handleSeek} onTrimStartChange={setTrimStart}
+            onTrimEndChange={setTrimEnd} onTogglePlay={togglePlay}
           />
-          <div className="timeline-markers">
-            {Array.from({ length: 11 }).map((_, i) => (
-              <span key={i} className="timeline-marker">
-                {formatTime((video.duration / 10) * i)}
-              </span>
-            ))}
-          </div>
         </div>
 
-        {/* Status Bar */}
+        {/* STATUS BAR */}
         <div className="status-bar">
           <div className="status-bar-left">
             <div className="status-indicator">
-              <span
-                className={`status-dot ${stage === "ready" ? "green" : stage === "exporting" ? "yellow" : "red"}`}
-              />
-              <span>
-                {stage === "ready"
-                  ? "Ready"
-                  : stage === "exporting"
-                    ? "Exporting..."
-                    : "Processing"}
-              </span>
+              <span className={`status-dot ${stage === "ready" ? "green" : stage === "exporting" ? "yellow" : "red"}`} />
+              <span>{stage === "ready" ? "Ready" : stage === "exporting" ? `Exporting ${exportProgress}%` : "Processing"}</span>
             </div>
-            <span>
-              {video.width}×{video.height} • {formatTime(video.duration)}
-            </span>
-            {transcription && (
-              <span>
-                {transcription.words.length} words transcribed
-              </span>
-            )}
+            <span>{video.width}×{video.height} · {formatTime(video.duration)}</span>
+            {transcription && <span>{transcription.words.length} words transcribed</span>}
+            {selectedClip && <span>Clip: {formatTime(trimStart)} → {formatTime(trimEnd)}</span>}
           </div>
-          <span>nogclip v1.0 — Free, No Watermarks</span>
+          <span>nogclip — Free, No Watermarks</span>
         </div>
       </div>
 
-      {/* Toast */}
+      {/* Export Progress Overlay */}
+      {stage === "exporting" && (
+        <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", padding: "12px 24px", background: "#0f0f1a", border: "1px solid rgba(139,92,246,0.3)", borderRadius: 12, zIndex: 50, display: "flex", alignItems: "center", gap: 16, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", minWidth: 280 }}>
+          <span className="spinner" />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>Exporting {exportProgress}%</div>
+            <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{exportMessage}</div>
+          </div>
+          <div className="progress-bar" style={{ width: 100 }}>
+            <div className="progress-bar-fill" style={{ width: `${exportProgress}%` }} />
+          </div>
+        </div>
+      )}
+
       {toast && (
         <div className={`toast toast-${toast.type}`}>
           <span>{toast.type === "success" ? "✅" : "❌"}</span>

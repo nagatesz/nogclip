@@ -115,6 +115,13 @@
   padding: 0;
 }
 
+/* Prevent text selection on interactive elements */
+button, [role="button"], label, nav, header,
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 html {
   font-size: 16px;
   scroll-behavior: smooth;

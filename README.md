@@ -1,36 +1,87 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🎬 nogclip
 
-## Getting Started
+**The Elite, 100% Free, AI-Powered Video Clipping Studio.**
 
-First, run the development server:
+Turn hours of long-form video into viral, social-ready clips (TikToks, Reels, Shorts) in seconds. No subscriptions, no signups, and **zero watermarks**.
 
+![nogclip Studio](public/favicon.ico) *<!-- Replace with a real banner/screenshot when available -->*
+
+## 🚀 The Vision
+
+Modern video clipping tools are expensive, gated behind subscriptions, and force ugly watermarks on your content. **nogclip** changes that by moving the heavy lifting to your browser. By leveraging `FFmpeg.wasm` and `face-api.js`, we provide professional-grade clipping tools with:
+
+- **Zero Cost**: All processing happens on your machine.
+- **Zero Watermarks**: Your content is yours. We never add branding.
+- **Privacy First**: Your videos never leave your browser for processing.
+
+---
+
+## ✨ Key Features
+
+- **🤖 AI Viral Clip Detection**: Our AI analyzes pacing, audio hooks, and content to identify segments with high viral potential.
+- **📈 Virality Scoring**: Every clip gets a score (0-100) based on retention-driving metrics.
+- **🎯 Auto-Reframing**: Automatically converts 16:9 landscape video to 9:16 portrait using intelligent face tracking.
+- **💬 Animated Captions**: Gorgeous, word-by-word synchronized captions with presets like "Karaoke," "Pop," and "Typewriter."
+- **✂️ Smart Trimming**: Effortlessly cut, split, and refine clips with a high-fidelity timeline and waveform view.
+- **🔗 YouTube Ingestion**: Simply paste a link and let the AI process the video directly from the web.
+
+---
+
+## 🛠 Tech Stack
+
+- **Framework**: [Next.js 15+](https://nextjs.org/) (App Router)
+- **Video Engine**: [@ffmpeg/ffmpeg](https://ffmpegwasm.netlify.app/) (FFmpeg.wasm)
+- **Computer Vision**: [face-api.js](https://github.com/justadudewhohacks/face-api.js/)
+- **AI / LLMs**: 
+  - **Groq (Whisper)**: Ultra-fast speech-to-text transcription.
+  - **Gemini / Groq Llama**: Viral content analysis and clipping logic.
+- **Styling**: Vanilla CSS (Modern design system with Glassmorphism).
+
+---
+
+## 🚦 Getting Started
+
+### 1. Prerequisites
+- Node.js 18+
+- A [Groq API Key](https://console.groq.com) (Free)
+- A [Gemini API Key](https://aistudio.google.com) (Free)
+
+### 2. Installation
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/yourusername/nogclip.git
+cd nogclip
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 3. Environment Variables
+Create a `.env.local` file in the root directory:
+```bash
+GROQ_API_KEY=your_groq_api_key_here
+GEMINI_API_KEY=your_gemini_api_key_here
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 4. Run Development Server
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000) to launch the studio.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## 🌍 Deployment
 
-To learn more about Next.js, take a look at the following resources:
+Note: This project requires `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` headers for `SharedArrayBuffer` (FFmpeg.wasm) to work.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+If deploying to **Vercel**, these are already configured in `vercel.json`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## ⚖️ License
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Distributed under the MIT License. See `LICENSE` for more information.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+<p align="center">
+  Built for creators who value freedom and quality. 🚀
+</p>

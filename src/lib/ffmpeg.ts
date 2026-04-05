@@ -196,14 +196,20 @@ export async function exportClip(
 
   await ffmpeg.writeFile(inputName, await fetchFile(videoFile));
 
-  const args: string[] = ["-i", inputName];
+  const args: string[] = [];
 
-  // Time range
-  if (options.trimStart !== undefined) {
+  // Input-seek: place -ss BEFORE -i for fast seeking (avoids decoding from start)
+  if (options.trimStart !== undefined && options.trimStart > 0) {
     args.push("-ss", options.trimStart.toString());
   }
-  if (options.trimEnd !== undefined) {
-    args.push("-to", options.trimEnd.toString());
+  args.push("-i", inputName);
+
+  // -t is duration from seek point (not absolute end time) when using input-seek
+  if (options.trimStart !== undefined && options.trimEnd !== undefined) {
+    const duration = options.trimEnd - options.trimStart;
+    if (duration > 0) args.push("-t", duration.toString());
+  } else if (options.trimEnd !== undefined && (options.trimStart === undefined || options.trimStart === 0)) {
+    args.push("-t", options.trimEnd.toString());
   }
 
   // Video filters
@@ -348,6 +354,7 @@ export async function detectSilence(
     "-",
   ]);
 
+  ffmpeg.off("log", logHandler);
   await ffmpeg.deleteFile(inputName);
 
   const silenceRegions: Array<{ start: number; end: number }> = [];

@@ -13,56 +13,74 @@ export interface CaptionStyle {
   shadowColor: string;
   position: "bottom" | "center" | "top";
   animation: "pop" | "typewriter" | "karaoke" | "fade" | "none";
+  italic?: boolean;
 }
+
+export const GOOGLE_FONTS = [
+  "Inter",
+  "Montserrat",
+  "Bangers",
+  "Oswald",
+  "Poppins",
+  "Roboto",
+  "Bebas Neue",
+  "Permanent Marker",
+  "Pacifico",
+  "Anton",
+  "Black Ops One",
+  "Bungee",
+  "Archivo Black",
+  "Righteous",
+];
 
 export const CAPTION_PRESETS: CaptionStyle[] = [
   {
     id: "bold-pop",
     name: "Bold Pop",
-    fontFamily: "Arial",
-    fontSize: 48,
-    fontWeight: "bold",
+    fontFamily: "Montserrat",
+    fontSize: 52,
+    fontWeight: "900",
     primaryColor: "#FFFFFF",
     highlightColor: "#FFD700",
     outlineColor: "#000000",
-    outlineWidth: 3,
-    shadowColor: "rgba(0,0,0,0.8)",
+    outlineWidth: 4,
+    shadowColor: "rgba(0,0,0,0.9)",
     position: "bottom",
     animation: "pop",
   },
   {
     id: "karaoke",
     name: "Karaoke",
-    fontFamily: "Arial",
-    fontSize: 44,
-    fontWeight: "bold",
+    fontFamily: "Poppins",
+    fontSize: 48,
+    fontWeight: "800",
     primaryColor: "#FFFFFF",
     highlightColor: "#8b5cf6",
     outlineColor: "#000000",
-    outlineWidth: 2,
-    shadowColor: "rgba(0,0,0,0.6)",
+    outlineWidth: 3,
+    shadowColor: "rgba(0,0,0,0.7)",
     position: "bottom",
     animation: "karaoke",
   },
   {
     id: "typewriter",
     name: "Typewriter",
-    fontFamily: "Courier New",
+    fontFamily: "JetBrains Mono",
     fontSize: 40,
-    fontWeight: "normal",
+    fontWeight: "600",
     primaryColor: "#00FF88",
     highlightColor: "#FFFFFF",
     outlineColor: "#000000",
     outlineWidth: 2,
-    shadowColor: "rgba(0,0,0,0.7)",
+    shadowColor: "rgba(0,0,0,0.8)",
     position: "center",
     animation: "typewriter",
   },
   {
     id: "minimal",
     name: "Minimal",
-    fontFamily: "Helvetica",
-    fontSize: 36,
+    fontFamily: "Inter",
+    fontSize: 38,
     fontWeight: "500",
     primaryColor: "#FFFFFF",
     highlightColor: "#06b6d4",
@@ -73,9 +91,37 @@ export const CAPTION_PRESETS: CaptionStyle[] = [
     animation: "fade",
   },
   {
+    id: "fire",
+    name: "Fire 🔥",
+    fontFamily: "Bangers",
+    fontSize: 56,
+    fontWeight: "400",
+    primaryColor: "#FF6B35",
+    highlightColor: "#FFD700",
+    outlineColor: "#000000",
+    outlineWidth: 4,
+    shadowColor: "rgba(255,100,0,0.5)",
+    position: "bottom",
+    animation: "pop",
+  },
+  {
+    id: "neon",
+    name: "Neon Glow",
+    fontFamily: "Bebas Neue",
+    fontSize: 54,
+    fontWeight: "400",
+    primaryColor: "#00FFFF",
+    highlightColor: "#FF00FF",
+    outlineColor: "#000033",
+    outlineWidth: 2,
+    shadowColor: "rgba(0,255,255,0.6)",
+    position: "bottom",
+    animation: "karaoke",
+  },
+  {
     id: "none",
     name: "No Captions",
-    fontFamily: "Arial",
+    fontFamily: "Inter",
     fontSize: 0,
     fontWeight: "normal",
     primaryColor: "#FFFFFF",
@@ -88,6 +134,199 @@ export const CAPTION_PRESETS: CaptionStyle[] = [
   },
 ];
 
+// Load Google Font dynamically
+const loadedFonts = new Set<string>();
+
+export function loadGoogleFont(fontFamily: string): void {
+  if (loadedFonts.has(fontFamily)) return;
+  loadedFonts.add(fontFamily);
+
+  const link = document.createElement("link");
+  link.href = `https://fonts.googleapis.com/css2?family=${fontFamily.replace(/ /g, "+")}:wght@400;500;600;700;800;900&display=swap`;
+  link.rel = "stylesheet";
+  document.head.appendChild(link);
+}
+
+// Get current words to display based on time
+export function getCurrentCaptionChunk(
+  words: TranscriptWord[],
+  currentTime: number,
+  maxWords: number = 5
+): { words: TranscriptWord[]; activeIndex: number } | null {
+  if (words.length === 0) return null;
+
+  // Find the active word
+  let activeWordIdx = -1;
+  for (let i = 0; i < words.length; i++) {
+    if (currentTime >= words[i].start && currentTime <= words[i].end + 0.1) {
+      activeWordIdx = i;
+      break;
+    }
+  }
+
+  // If between words, find the next upcoming word
+  if (activeWordIdx === -1) {
+    for (let i = 0; i < words.length; i++) {
+      if (words[i].start > currentTime) {
+        // Check if we're in the gap — show previous chunk
+        if (i > 0 && currentTime - words[i - 1].end < 0.5) {
+          activeWordIdx = i - 1;
+        }
+        break;
+      }
+    }
+  }
+
+  if (activeWordIdx === -1) return null;
+
+  // Build chunk around active word (show context)
+  const chunks = buildWordChunks(words, maxWords);
+  for (const chunk of chunks) {
+    const chunkStart = chunk[0].start;
+    const chunkEnd = chunk[chunk.length - 1].end;
+    if (currentTime >= chunkStart - 0.05 && currentTime <= chunkEnd + 0.3) {
+      const activeInChunk = chunk.findIndex(
+        (w) => currentTime >= w.start && currentTime <= w.end + 0.1
+      );
+      return { words: chunk, activeIndex: Math.max(0, activeInChunk) };
+    }
+  }
+
+  return null;
+}
+
+function buildWordChunks(
+  words: TranscriptWord[],
+  maxPerChunk: number
+): TranscriptWord[][] {
+  const chunks: TranscriptWord[][] = [];
+  let current: TranscriptWord[] = [];
+
+  for (const word of words) {
+    current.push(word);
+    if (
+      current.length >= maxPerChunk ||
+      (current.length > 2 && word.end - current[0].start > 3)
+    ) {
+      chunks.push([...current]);
+      current = [];
+    }
+  }
+
+  if (current.length > 0) {
+    chunks.push(current);
+  }
+
+  return chunks;
+}
+
+// Render live captions on a canvas overlay
+export function renderLiveCaptions(
+  ctx: CanvasRenderingContext2D,
+  words: TranscriptWord[],
+  currentTime: number,
+  style: CaptionStyle,
+  canvasWidth: number,
+  canvasHeight: number
+): void {
+  if (style.id === "none" || words.length === 0) return;
+
+  const chunk = getCurrentCaptionChunk(words, currentTime);
+  if (!chunk) return;
+
+  ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+  const scale = canvasWidth / 1080;
+  const fontSize = Math.round(style.fontSize * scale);
+  const fontStyle = style.italic ? "italic " : "";
+  ctx.font = `${fontStyle}${style.fontWeight} ${fontSize}px ${style.fontFamily}, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  let y: number;
+  if (style.position === "bottom") y = canvasHeight * 0.82;
+  else if (style.position === "top") y = canvasHeight * 0.15;
+  else y = canvasHeight * 0.5;
+
+  const fullText = chunk.words.map((w) => w.word).join(" ");
+  const textMetrics = ctx.measureText(fullText);
+
+  // Background pill for readability
+  const padding = 16 * scale;
+  const bgX = canvasWidth / 2 - textMetrics.width / 2 - padding;
+  const bgY = y - fontSize / 2 - padding / 2;
+  const bgW = textMetrics.width + padding * 2;
+  const bgH = fontSize + padding;
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+  const radius = 12 * scale;
+  ctx.beginPath();
+  ctx.roundRect(bgX, bgY, bgW, bgH, radius);
+  ctx.fill();
+
+  // Draw each word
+  let xPos = canvasWidth / 2 - textMetrics.width / 2;
+
+  for (let i = 0; i < chunk.words.length; i++) {
+    const word = chunk.words[i];
+    const isActive = i === chunk.activeIndex;
+    const isPast = i < chunk.activeIndex;
+    const wordText = word.word + (i < chunk.words.length - 1 ? " " : "");
+    const wordWidth = ctx.measureText(wordText).width;
+
+    // Shadow
+    ctx.shadowColor = style.shadowColor;
+    ctx.shadowBlur = isActive ? 12 * scale : 6 * scale;
+    ctx.shadowOffsetX = 2 * scale;
+    ctx.shadowOffsetY = 2 * scale;
+
+    // Outline
+    if (style.outlineWidth > 0) {
+      ctx.strokeStyle = style.outlineColor;
+      ctx.lineWidth = style.outlineWidth * 2 * scale;
+      ctx.lineJoin = "round";
+      ctx.strokeText(wordText, xPos + wordWidth / 2, y);
+    }
+
+    // Fill — active word gets highlight color + scale effect
+    if (isActive) {
+      // Scale animation for active word
+      if (style.animation === "pop") {
+        const progress = Math.min(
+          1,
+          (currentTime - word.start) / Math.max(0.1, word.end - word.start)
+        );
+        const popScale = 1 + Math.sin(progress * Math.PI) * 0.08;
+        ctx.save();
+        ctx.translate(xPos + wordWidth / 2, y);
+        ctx.scale(popScale, popScale);
+        ctx.fillStyle = style.highlightColor;
+        ctx.fillText(wordText, 0, 0);
+        ctx.restore();
+      } else {
+        ctx.fillStyle = style.highlightColor;
+        ctx.fillText(wordText, xPos + wordWidth / 2, y);
+      }
+    } else if (isPast) {
+      ctx.fillStyle = style.primaryColor;
+      ctx.fillText(wordText, xPos + wordWidth / 2, y);
+    } else {
+      // Upcoming words — slightly dimmer
+      ctx.fillStyle = style.primaryColor + "CC";
+      ctx.fillText(wordText, xPos + wordWidth / 2, y);
+    }
+
+    // Reset shadow
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+
+    xPos += wordWidth;
+  }
+}
+
+// ASS subtitle generation (for export)
 export function generateASSSubtitles(
   words: TranscriptWord[],
   style: CaptionStyle,
@@ -122,35 +361,32 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${style.fontFamily},${style.fontSize},${hexToASS(style.primaryColor)},${hexToASS(style.highlightColor)},${hexToASS(style.outlineColor)},&H80000000&,${style.fontWeight === "bold" ? 1 : 0},0,0,0,100,100,0,0,1,${style.outlineWidth},1,${alignment},40,40,${marginV},1
+Style: Default,${style.fontFamily},${style.fontSize},${hexToASS(style.primaryColor)},${hexToASS(style.highlightColor)},${hexToASS(style.outlineColor)},&H80000000&,${style.fontWeight === "bold" || parseInt(style.fontWeight) >= 700 ? 1 : 0},0,0,0,100,100,0,0,1,${style.outlineWidth},1,${alignment},40,40,${marginV},1
 Style: Highlight,${style.fontFamily},${Math.round(style.fontSize * 1.1)},${hexToASS(style.highlightColor)},${hexToASS(style.primaryColor)},${hexToASS(style.outlineColor)},&H80000000&,1,0,0,0,100,100,0,0,1,${style.outlineWidth + 1},2,${alignment},40,40,${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
-  // Group words into chunks of ~4-6 words for display
-  const chunks = chunkWords(words, 5);
+  const chunks = buildWordChunks(words, 5);
 
   for (const chunk of chunks) {
     const startTime = formatASSTime(chunk[0].start);
     const endTime = formatASSTime(chunk[chunk.length - 1].end);
 
     if (style.animation === "karaoke") {
-      // Karaoke: each word highlights as it's spoken
       let karaokeText = "";
       for (let i = 0; i < chunk.length; i++) {
-        const wordDur = Math.round(
-          (chunk[i].end - chunk[i].start) * 100
-        );
+        const wordDur = Math.round((chunk[i].end - chunk[i].start) * 100);
         karaokeText += `{\\kf${wordDur}}${chunk[i].word} `;
       }
       ass += `Dialogue: 0,${startTime},${endTime},Default,,0,0,0,,${karaokeText.trim()}\n`;
     } else if (style.animation === "pop") {
-      // Pop: words appear one at a time with scale animation
       for (let i = 0; i < chunk.length; i++) {
         const wStart = formatASSTime(chunk[i].start);
-        const wEnd = formatASSTime(chunk[Math.min(i + 2, chunk.length - 1)].end);
+        const wEnd = formatASSTime(
+          chunk[Math.min(i + 2, chunk.length - 1)].end
+        );
         const text = chunk
           .slice(0, i + 1)
           .map((w) => w.word)
@@ -167,31 +403,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   }
 
   return ass;
-}
-
-function chunkWords(
-  words: TranscriptWord[],
-  maxPerChunk: number
-): TranscriptWord[][] {
-  const chunks: TranscriptWord[][] = [];
-  let current: TranscriptWord[] = [];
-
-  for (const word of words) {
-    current.push(word);
-    if (
-      current.length >= maxPerChunk ||
-      (current.length > 2 && word.end - current[0].start > 3)
-    ) {
-      chunks.push([...current]);
-      current = [];
-    }
-  }
-
-  if (current.length > 0) {
-    chunks.push(current);
-  }
-
-  return chunks;
 }
 
 function formatASSTime(seconds: number): string {
@@ -212,9 +423,7 @@ export function renderCaptionPreview(
 ): void {
   if (style.id === "none") return;
 
-  const fontSize = Math.round(
-    style.fontSize * (canvasWidth / 1080)
-  );
+  const fontSize = Math.round(style.fontSize * (canvasWidth / 1080));
   ctx.font = `${style.fontWeight} ${fontSize}px ${style.fontFamily}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -226,13 +435,11 @@ export function renderCaptionPreview(
 
   const x = canvasWidth / 2;
 
-  // Shadow
   ctx.shadowColor = style.shadowColor;
   ctx.shadowBlur = 8;
   ctx.shadowOffsetX = 2;
   ctx.shadowOffsetY = 2;
 
-  // Outline
   if (style.outlineWidth > 0) {
     ctx.strokeStyle = style.outlineColor;
     ctx.lineWidth = style.outlineWidth * 2;
@@ -240,13 +447,9 @@ export function renderCaptionPreview(
     ctx.strokeText(word, x, y);
   }
 
-  // Fill
-  ctx.fillStyle = highlighted
-    ? style.highlightColor
-    : style.primaryColor;
+  ctx.fillStyle = highlighted ? style.highlightColor : style.primaryColor;
   ctx.fillText(word, x, y);
 
-  // Reset shadow
   ctx.shadowColor = "transparent";
   ctx.shadowBlur = 0;
   ctx.shadowOffsetX = 0;
