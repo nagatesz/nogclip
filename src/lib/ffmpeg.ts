@@ -166,7 +166,8 @@ export async function extractAudioChunk(
 
 export async function trimVideo(
   videoFile: File,
-  options: TrimOptions,
+  startTime: number,
+  endTime: number,
   onProgress?: ProgressCallback
 ): Promise<Blob> {
   const ffmpeg = await loadFFmpeg(onProgress);
@@ -187,9 +188,9 @@ export async function trimVideo(
       "-i",
       "/worker/input.mp4",
       "-ss",
-      options.startTime.toString(),
+      startTime.toString(),
       "-to",
-      options.endTime.toString(),
+      endTime.toString(),
       "-c:v",
       "copy", // Copy video stream instead of re-encoding where possible
       "-c:a",
@@ -212,7 +213,7 @@ export async function trimVideo(
   return new Blob([data], { type: "video/mp4" });
 }
 
-export async function exportVideo(
+export async function exportClip(
   videoFile: File,
   opts: ExportOptions,
   onProgress?: ProgressCallback
