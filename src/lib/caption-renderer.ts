@@ -300,11 +300,10 @@ export function renderLiveCaptions(
     if (isActive) {
       // Scale animation for active word
       if (style.animation === "pop") {
-        const progress = Math.min(
-          1,
-          (currentTime - word.start) / Math.max(0.1, word.end - word.start)
-        );
-        const popScale = 1 + Math.sin(progress * Math.PI) * 0.08;
+        // Fast 150ms pop animation
+        const animDuration = 0.15;
+        const progress = Math.min(1, Math.max(0, currentTime - word.start) / animDuration);
+        const popScale = 1 + Math.sin(progress * Math.PI) * 0.15;
         ctx.save();
         ctx.translate(xPos + wordWidth / 2, y);
         ctx.scale(popScale, popScale);

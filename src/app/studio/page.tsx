@@ -481,12 +481,12 @@ export default function StudioPage() {
       <div className={`workspace ${sidebarOpen ? "sidebar-expanded" : ""}`}>
         {/* LEFT — Transcript */}
         <div className="panel-left">
-          <div className="transcript-header">
+          <div className="transcript-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <label className="transcript-toggle">
               <input type="checkbox" defaultChecked />
               Transcript only
             </label>
-            <button className="transcript-add-section">+ Add a section</button>
+            <span style={{ fontSize: 11, color: "#64748b", fontWeight: "normal" }}>Click active word to edit</span>
           </div>
           <div className="transcript-body" ref={transcriptBodyRef}>
             {transcription ? (
@@ -505,27 +505,42 @@ export default function StudioPage() {
                         setWordColorPickerIdx(wordColorPickerIdx === i ? null : i);
                       }}
                       onClick={(e) => { 
-                         if (videoRef.current) { videoRef.current.currentTime = word.start; setCurrentTime(word.start); }
+                         if (wordColorPickerIdx === i) return;
+                         if (isActive) {
+                           setWordColorPickerIdx(i);
+                         } else {
+                           if (videoRef.current) { videoRef.current.currentTime = word.start; setCurrentTime(word.start); }
+                         }
                       }}
-                      title="Left-click to seek. Right-click to edit."
+                      onDoubleClick={(e) => {
+                         e.preventDefault();
+                         setWordColorPickerIdx(i);
+                      }}
+                      title="Click to seek. Click active word to edit."
                     >
                       {word.word}
                     </span>{" "}
                     {wordColorPickerIdx === i && (
-                      <div style={{ position: "absolute", bottom: "100%", left: "50%", transform: "translateX(-50%)", background: "#1e293b", padding: 8, borderRadius: 8, display: "flex", flexDirection: "column", gap: 8, zIndex: 60, boxShadow: "0 4px 12px rgba(0,0,0,0.5)", minWidth: 120 }}>
-                         <input type="text" value={word.word} autoFocus style={{ background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "4px 6px", fontSize: 11, borderRadius: 4, outline: "none" }} onChange={(e) => {
+                      <div style={{ position: "absolute", bottom: "100%", left: "50%", transform: "translateX(-50%)", background: "#1e293b", padding: 12, borderRadius: 8, display: "flex", flexDirection: "column", gap: 10, zIndex: 60, boxShadow: "0 4px 20px rgba(0,0,0,0.6)", minWidth: 160 }}>
+                         <input type="text" value={word.word} autoFocus style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", padding: "6px 8px", fontSize: 13, borderRadius: 4, outline: "none", width: "100%" }} onChange={(e) => {
                             const w = [...transcription.words]; w[i].word = e.target.value; setTranscription({ ...transcription, words: w });
                          }} />
-                         <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "center" }}>
+                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center", alignItems: "center" }}>
+                           <label style={{ width: 22, height: 22, borderRadius: "50%", cursor: "pointer", background: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)", display: "flex", alignItems: "center", justifyContent: "center" }} title="Custom Color">
+                             <input type="color" style={{ opacity: 0, position: "absolute", width: 1, height: 1 }} onChange={(e) => {
+                                const w = [...transcription.words]; w[i].color = e.target.value; setTranscription({ ...transcription, words: w });
+                             }} />
+                           </label>
                            {["#FFFFFF", "#FFD700", "#FF6B35", "#00FF88", "#00FFFF", "#FF00FF", "#8b5cf6", ""].map((c) => (
                              <div key={c} onClick={() => {
                                 const w = [...transcription.words]; w[i].color = c === "" ? undefined : c;
                                 setTranscription({ ...transcription, words: w }); setWordColorPickerIdx(null);
-                             }} style={{ width: 18, height: 18, borderRadius: "50%", cursor: "pointer", background: c || "#4b5563", border: c === "" ? "1px solid #94a3b8" : "none", display: c === "" ? "flex" : "block", alignItems: "center", justifyContent: "center", fontSize: 10 }}>
+                             }} style={{ width: 20, height: 20, borderRadius: "50%", cursor: "pointer", background: c || "#4b5563", border: c === "" ? "1px solid #94a3b8" : "none", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10 }}>
                                {c === "" && "✕"}
                              </div>
                            ))}
                          </div>
+                         <button onClick={() => setWordColorPickerIdx(null)} style={{ background: "#3b82f6", color: "white", padding: "4px", borderRadius: 4, border: "none", fontSize: 11, cursor: "pointer" }}>Done</button>
                       </div>
                     )}
                   </span>
