@@ -1,8 +1,52 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Innertube } from "youtubei.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+interface CobaltResponse {
+  status: string;
+  url?: string;
+  text?: string;
+  picker?: Array<{ url: string; type: string }>;
+}
+
+const COBALT_INSTANCES = [
+  "https://co.eepy.ovh/",
+  "https://cobalt.clxxped.lol/",
+  "https://cobalt.meowing.de/",
+  "https://cobalt.squair.xyz/",
+  "https://cobalt.blackcat.sweeux.org/",
+  "https://cobalt.kittycat.boo/",
+  "https://dl.woof.monster/",
+  "https://cobalt.cjs.nz/"
+];
+
+async function fetchFromCobalt(videoUrl: string): Promise<CobaltResponse | null> {
+  const bodyPayload = JSON.stringify({ url: videoUrl });
+  
+  for (const instance of COBALT_INSTANCES) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
+      const res = await fetch(instance, {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: bodyPayload,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      
+      if (!res.ok) continue;
+      const data: CobaltResponse = await res.json();
+      if (data.status === "error") continue;
+      if (data.url) return data;
+    } catch (err) {
+      continue;
+    }
+  }
+  return null;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,31 +56,23 @@ export async function POST(request: NextRequest) {
     const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|shorts\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
     const match = url.match(ytRegex);
     if (!match || !match[5]) return NextResponse.json({ error: "Invalid YouTube URL" }, { status: 400 });
-    const videoId = match[5];
 
-    let downloadUrl: string | undefined;
-
-    try {
-      const yt = await Innertube.create({ generate_session_locally: true });
-      const info = await yt.getBasicInfo(videoId, { client: "IOS" });
-      const format = info.chooseFormat({ type: 'video+audio', quality: 'best' });
-      downloadUrl = format?.url;
-    } catch (err: any) {
-      console.error("youtubei.js error:", err);
-      return NextResponse.json({ error: `youtubei.js error: ${err.message || String(err)}` }, { status: 502 });
-    }
-
-    if (!downloadUrl) {
+    const cobaltData = await fetchFromCobalt(url);
+    
+    if (!cobaltData?.url) {
       return NextResponse.json({ error: "Download service unavailable. Please upload the video directly." }, { status: 502 });
     }
 
-    if (!proxyStream) return NextResponse.json({ url: downloadUrl, status: "ok" });
+    if (!proxyStream) return NextResponse.json({ url: cobaltData.url, status: "ok" });
 
     // PROXY bytes server-side — fixes client CORS issue
-    const videoRes = await fetch(downloadUrl, {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 55000);
+    const videoRes = await fetch(cobaltData.url, {
       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36" },
-      signal: AbortSignal.timeout(55000),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
     
     if (!videoRes.ok) return NextResponse.json({ error: "Failed to fetch video stream" }, { status: 502 });
 
