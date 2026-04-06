@@ -73,7 +73,8 @@ export default function Timeline({
   const waveCanvasRef = useRef<HTMLCanvasElement>(null);
   const scrollContentRef = useRef<HTMLDivElement>(null);
 
-  const contentWidth = Math.max(800, zoom * 800);
+  const baseWidth = Math.max(800, duration * 20); // At least 20px per second or 800px min
+  const contentWidth = baseWidth * zoom;
   const pxPerSecond = duration > 0 ? contentWidth / duration : 1;
 
   const timeToPx = useCallback(

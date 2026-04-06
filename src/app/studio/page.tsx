@@ -147,8 +147,8 @@ export default function StudioPage() {
       setStage("loading-ffmpeg");
       setStageMessage("Loading video engine...");
       const info = await getVideoInfo(file);
-      const thumb = await generateThumbnail(file, 1);
       const url = URL.createObjectURL(file);
+      const thumb = await generateThumbnail(url, 1);
       setVideo({ file, url, duration: info.duration, width: info.width, height: info.height, thumbnail: thumb, title: title || file.name.replace(/\.[^.]+$/, "") || "Untitled Clip" });
       setTrimStart(0); setTrimEnd(info.duration);
 
@@ -156,7 +156,7 @@ export default function StudioPage() {
       const numThumbs = Math.min(60, Math.max(20, Math.floor(info.duration / 5)));
       const thumbInterval = info.duration / numThumbs;
       const thumbPromises: Promise<string>[] = [];
-      for (let t = 0; t < info.duration; t += thumbInterval) thumbPromises.push(generateThumbnail(file, t));
+      for (let t = 0; t < info.duration; t += thumbInterval) thumbPromises.push(generateThumbnail(url, t));
       Promise.all(thumbPromises).then(thumbs => setThumbnails(thumbs.filter(t => t !== "")));
 
       const onFFmpegProgress: ProgressCallback = (_p, msg) => setStageMessage(msg);

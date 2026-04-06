@@ -85,7 +85,7 @@ export async function extractAudio(
   onProgress?.(0, "Extracting audio...");
 
   const inputName = "input" + getExtension(videoFile.name);
-  const outputName = "audio.wav";
+  const outputName = "audio.mp3";
 
   await ffmpeg.writeFile(inputName, await fetchFile(videoFile));
   await ffmpeg.exec([
@@ -93,11 +93,13 @@ export async function extractAudio(
     inputName,
     "-vn",
     "-acodec",
-    "pcm_s16le",
+    "libmp3lame",
     "-ar",
     "16000",
     "-ac",
     "1",
+    "-b:a",
+    "64k",
     outputName,
   ]);
 
@@ -107,7 +109,7 @@ export async function extractAudio(
 
   onProgress?.(100, "Audio extracted");
   // @ts-expect-error FFmpeg FileData Uint8Array is runtime-compatible with BlobPart
-  return new Blob([data], { type: "audio/wav" });
+  return new Blob([data], { type: "audio/mp3" });
 }
 
 export async function extractAudioChunk(
@@ -119,7 +121,7 @@ export async function extractAudioChunk(
   const ffmpeg = await loadFFmpeg(onProgress);
 
   const inputName = "input" + getExtension(videoFile.name);
-  const outputName = `chunk_${startSec}.wav`;
+  const outputName = `chunk_${startSec}.mp3`;
 
   await ffmpeg.writeFile(inputName, await fetchFile(videoFile));
   await ffmpeg.exec([
@@ -131,11 +133,13 @@ export async function extractAudioChunk(
     durationSec.toString(),
     "-vn",
     "-acodec",
-    "pcm_s16le",
+    "libmp3lame",
     "-ar",
     "16000",
     "-ac",
     "1",
+    "-b:a",
+    "64k",
     outputName,
   ]);
 
@@ -144,7 +148,7 @@ export async function extractAudioChunk(
   await ffmpeg.deleteFile(outputName);
 
   // @ts-expect-error FFmpeg FileData Uint8Array is runtime-compatible with BlobPart
-  return new Blob([data], { type: "audio/wav" });
+  return new Blob([data], { type: "audio/mp3" });
 }
 
 export async function trimVideo(
@@ -295,14 +299,17 @@ export async function getVideoInfo(
 }
 
 export async function generateThumbnail(
-  videoFile: File,
+  videoSource: File | string,
   timeSeconds: number = 0
 ): Promise<string> {
   return new Promise((resolve) => {
     const video = document.createElement("video");
     video.preload = "auto";
     video.muted = true;
-    video.currentTime = timeSeconds;
+    
+    // Check if it's a file or a string URL
+    const isFile = typeof videoSource !== "string";
+    video.src = isFile ? URL.createObjectURL(videoSource) : videoSource;
 
     video.onloadeddata = () => {
       video.currentTime = timeSeconds;
@@ -314,15 +321,14 @@ export async function generateThumbnail(
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext("2d")!;
       ctx.drawImage(video, 0, 0);
-      URL.revokeObjectURL(video.src);
+      if (isFile) URL.revokeObjectURL(video.src);
       resolve(canvas.toDataURL("image/jpeg", 0.7));
     };
 
     video.onerror = () => {
+      if (isFile) URL.revokeObjectURL(video.src);
       resolve("");
     };
-
-    video.src = URL.createObjectURL(videoFile);
   });
 }
 
