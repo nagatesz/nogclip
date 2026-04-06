@@ -466,9 +466,6 @@ export default function Timeline({
           />
         </div>
 
-        {/* Add Track Buttons */}
-        <button className="tl-add-track left">+</button>
-        <button className="tl-add-track right">+</button>
       </div>
     </div>
   );

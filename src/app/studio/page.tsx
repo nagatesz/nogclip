@@ -487,36 +487,32 @@ export default function StudioPage() {
                     <span
                       className={`transcript-word ${isActive ? "active" : ""} ${kwType === "bold" ? "bold-keyword" : ""} ${kwType === "highlight" ? "highlight" : ""}`}
                       style={{ color: word.color || undefined, borderBottom: wordColorPickerIdx === i ? "2px solid #8b5cf6" : "none" }}
-                      contentEditable
-                      suppressContentEditableWarning
-                      onBlur={(e) => {
-                        const newTxt = e.currentTarget.textContent || "";
-                        if (newTxt !== word.word && transcription) {
-                          const w = [...transcription.words]; w[i].word = newTxt;
-                          setTranscription({ ...transcription, words: w });
-                        }
-                      }}
                       onContextMenu={(e) => {
                         e.preventDefault();
                         setWordColorPickerIdx(wordColorPickerIdx === i ? null : i);
                       }}
                       onClick={(e) => { 
-                         if (e.altKey && videoRef.current) { videoRef.current.currentTime = word.start; setCurrentTime(word.start); }
+                         if (videoRef.current) { videoRef.current.currentTime = word.start; setCurrentTime(word.start); }
                       }}
-                      title="Alt+Click to seek. Right-click for color."
+                      title="Left-click to seek. Right-click to edit."
                     >
                       {word.word}
                     </span>{" "}
                     {wordColorPickerIdx === i && (
-                      <div style={{ position: "absolute", bottom: "100%", left: "50%", transform: "translateX(-50%)", background: "#1e293b", padding: 6, borderRadius: 8, display: "flex", gap: 4, zIndex: 50, boxShadow: "0 4px 12px rgba(0,0,0,0.5)" }}>
-                         {["#FFFFFF", "#FFD700", "#FF6B35", "#00FF88", "#00FFFF", "#FF00FF", "#8b5cf6", ""].map((c) => (
-                           <div key={c} onClick={() => {
-                              const w = [...transcription.words]; w[i].color = c === "" ? undefined : c;
-                              setTranscription({ ...transcription, words: w }); setWordColorPickerIdx(null);
-                           }} style={{ width: 16, height: 16, borderRadius: "50%", cursor: "pointer", background: c || "#4b5563", border: c === "" ? "1px solid #94a3b8" : "none", display: c === "" ? "flex" : "block", alignItems: "center", justifyContent: "center", fontSize: 10 }}>
-                             {c === "" && "✕"}
-                           </div>
-                         ))}
+                      <div style={{ position: "absolute", bottom: "100%", left: "50%", transform: "translateX(-50%)", background: "#1e293b", padding: 8, borderRadius: 8, display: "flex", flexDirection: "column", gap: 8, zIndex: 60, boxShadow: "0 4px 12px rgba(0,0,0,0.5)", minWidth: 120 }}>
+                         <input type="text" value={word.word} autoFocus style={{ background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "4px 6px", fontSize: 11, borderRadius: 4, outline: "none" }} onChange={(e) => {
+                            const w = [...transcription.words]; w[i].word = e.target.value; setTranscription({ ...transcription, words: w });
+                         }} />
+                         <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "center" }}>
+                           {["#FFFFFF", "#FFD700", "#FF6B35", "#00FF88", "#00FFFF", "#FF00FF", "#8b5cf6", ""].map((c) => (
+                             <div key={c} onClick={() => {
+                                const w = [...transcription.words]; w[i].color = c === "" ? undefined : c;
+                                setTranscription({ ...transcription, words: w }); setWordColorPickerIdx(null);
+                             }} style={{ width: 18, height: 18, borderRadius: "50%", cursor: "pointer", background: c || "#4b5563", border: c === "" ? "1px solid #94a3b8" : "none", display: c === "" ? "flex" : "block", alignItems: "center", justifyContent: "center", fontSize: 10 }}>
+                               {c === "" && "✕"}
+                             </div>
+                           ))}
+                         </div>
                       </div>
                     )}
                   </span>
