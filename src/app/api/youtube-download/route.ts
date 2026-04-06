@@ -21,8 +21,9 @@ export async function POST(request: NextRequest) {
       const info = await yt.getBasicInfo(videoId);
       const format = info.chooseFormat({ type: 'video+audio', quality: 'best' });
       downloadUrl = format?.url;
-    } catch (err) {
+    } catch (err: any) {
       console.error("youtubei.js error:", err);
+      return NextResponse.json({ error: `youtubei.js error: ${err.message || String(err)}` }, { status: 502 });
     }
 
     if (!downloadUrl) {
