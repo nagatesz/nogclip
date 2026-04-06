@@ -14,6 +14,9 @@ export interface CaptionStyle {
   position: "bottom" | "center" | "top";
   animation: "pop" | "typewriter" | "karaoke" | "fade" | "none";
   italic?: boolean;
+  offsetX?: number;
+  offsetY?: number;
+  scale?: number;
 }
 
 export const GOOGLE_FONTS = [
@@ -184,7 +187,7 @@ export function getCurrentCaptionChunk(
   for (const chunk of chunks) {
     const chunkStart = chunk[0].start;
     const chunkEnd = chunk[chunk.length - 1].end;
-    if (currentTime >= chunkStart - 0.05 && currentTime <= chunkEnd + 0.3) {
+    if (currentTime >= chunkStart - 0.05 && currentTime <= chunkEnd + 0.05) {
       const activeInChunk = chunk.findIndex(
         (w) => currentTime >= w.start && currentTime <= w.end + 0.1
       );
@@ -237,7 +240,8 @@ export function renderLiveCaptions(
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
   const scale = canvasWidth / 1080;
-  const fontSize = Math.round(style.fontSize * scale);
+  const configScale = style.scale || 1;
+  const fontSize = Math.round(style.fontSize * scale * configScale);
   const fontStyle = style.italic ? "italic " : "";
   ctx.font = `${fontStyle}${style.fontWeight} ${fontSize}px ${style.fontFamily}, sans-serif`;
   ctx.textAlign = "center";
@@ -247,13 +251,17 @@ export function renderLiveCaptions(
   if (style.position === "bottom") y = canvasHeight * 0.82;
   else if (style.position === "top") y = canvasHeight * 0.15;
   else y = canvasHeight * 0.5;
+  
+  if (style.offsetY) y += style.offsetY * canvasHeight;
+  let baseX = canvasWidth / 2;
+  if (style.offsetX) baseX += style.offsetX * canvasWidth;
 
   const fullText = chunk.words.map((w) => w.word).join(" ");
   const textMetrics = ctx.measureText(fullText);
 
   // Background pill for readability
-  const padding = 16 * scale;
-  const bgX = canvasWidth / 2 - textMetrics.width / 2 - padding;
+  const padding = 16 * scale * configScale;
+  const bgX = baseX - textMetrics.width / 2 - padding;
   const bgY = y - fontSize / 2 - padding / 2;
   const bgW = textMetrics.width + padding * 2;
   const bgH = fontSize + padding;
@@ -265,7 +273,7 @@ export function renderLiveCaptions(
   ctx.fill();
 
   // Draw each word
-  let xPos = canvasWidth / 2 - textMetrics.width / 2;
+  let xPos = baseX - textMetrics.width / 2;
 
   for (let i = 0; i < chunk.words.length; i++) {
     const word = chunk.words[i];
@@ -300,19 +308,19 @@ export function renderLiveCaptions(
         ctx.save();
         ctx.translate(xPos + wordWidth / 2, y);
         ctx.scale(popScale, popScale);
-        ctx.fillStyle = style.highlightColor;
+        ctx.fillStyle = word.color || style.highlightColor;
         ctx.fillText(wordText, 0, 0);
         ctx.restore();
       } else {
-        ctx.fillStyle = style.highlightColor;
+        ctx.fillStyle = word.color || style.highlightColor;
         ctx.fillText(wordText, xPos + wordWidth / 2, y);
       }
     } else if (isPast) {
-      ctx.fillStyle = style.primaryColor;
+      ctx.fillStyle = word.color || style.primaryColor;
       ctx.fillText(wordText, xPos + wordWidth / 2, y);
     } else {
       // Upcoming words — slightly dimmer
-      ctx.fillStyle = style.primaryColor + "CC";
+      ctx.fillStyle = word.color ? word.color + "CC" : style.primaryColor + "CC";
       ctx.fillText(wordText, xPos + wordWidth / 2, y);
     }
 

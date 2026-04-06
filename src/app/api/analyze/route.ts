@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
     }
 
     const prompt = `You are an expert social media content strategist and video editor. Analyze this video transcript and identify the best clips for TikTok, YouTube Shorts, and Instagram Reels.
-
+    
 VIDEO INFO:
 - Total duration: ${duration} seconds (${Math.round(duration / 60)} minutes)
 - Total segments: ${segmentCount}
@@ -70,7 +70,9 @@ IMPORTANT RULES:
 - Clips should not overlap significantly
 - hookStrength must be one of: "weak", "medium", "strong"
 - viralityScore must be 0-100
-- Return valid JSON only, no additional text`;
+- Return valid JSON only, no additional text
+- CRITICAL: If the transcript appears to be a Music Video, a Song, or unstructured repetitive lyrics, DO NOT fail. Still extract the most energetic or musically cohesive blocks (e.g., verses or the chorus) that fit the 15-60s window.
+- If there is barely any usable text at all, simply return the first 30 seconds as the only clip and give it a low virality score. NEVER return empty JSON arrays or malformed text. You MUST return the JSON structure perfectly.`;
 
     const geminiResponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,

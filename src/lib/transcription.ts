@@ -2,6 +2,7 @@ export interface TranscriptWord {
   word: string;
   start: number;
   end: number;
+  color?: string;
 }
 
 export interface TranscriptSegment {

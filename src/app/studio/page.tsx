@@ -67,6 +67,8 @@ export default function StudioPage() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success"|"error" } | null>(null);
   const [captionsEnabled, setCaptionsEnabled] = useState(true);
+  const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
+  const [wordColorPickerIdx, setWordColorPickerIdx] = useState<number | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -248,6 +250,16 @@ export default function StudioPage() {
     if (videoRef.current) videoRef.current.currentTime = time;
     setCurrentTime(time);
   }, []);
+
+  const handleCanvasMouseDown = (e: React.MouseEvent) => { setIsDraggingCanvas(true); };
+  const handleCanvasMouseMove = (e: React.MouseEvent) => {
+    if (!isDraggingCanvas) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const dx = e.movementX / rect.width;
+    const dy = e.movementY / rect.height;
+    setCaptionStyle(s => ({ ...s, offsetX: (s.offsetX || 0) + dx, offsetY: (s.offsetY || 0) + dy }));
+  };
+  const handleCanvasMouseUp = () => { setIsDraggingCanvas(false); };
 
   const selectClip = (clip: ClipSuggestion) => {
     setSelectedClip(clip); setTrimStart(clip.start); setTrimEnd(clip.end);
@@ -470,13 +482,43 @@ export default function StudioPage() {
                 const kwType = isKeyword(word.word);
                 const showSep = i > 0 && word.start - transcription.words[i - 1].end > 1.5;
                 return (
-                  <span key={i}>
+                  <span key={i} style={{ position: "relative" }}>
                     {showSep && <span className="transcript-separator">• • •</span>}
                     <span
                       className={`transcript-word ${isActive ? "active" : ""} ${kwType === "bold" ? "bold-keyword" : ""} ${kwType === "highlight" ? "highlight" : ""}`}
-                      onClick={() => { if (videoRef.current) { videoRef.current.currentTime = word.start; setCurrentTime(word.start); } }}>
+                      style={{ color: word.color || undefined, borderBottom: wordColorPickerIdx === i ? "2px solid #8b5cf6" : "none" }}
+                      contentEditable
+                      suppressContentEditableWarning
+                      onBlur={(e) => {
+                        const newTxt = e.currentTarget.textContent || "";
+                        if (newTxt !== word.word && transcription) {
+                          const w = [...transcription.words]; w[i].word = newTxt;
+                          setTranscription({ ...transcription, words: w });
+                        }
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setWordColorPickerIdx(wordColorPickerIdx === i ? null : i);
+                      }}
+                      onClick={(e) => { 
+                         if (e.altKey && videoRef.current) { videoRef.current.currentTime = word.start; setCurrentTime(word.start); }
+                      }}
+                      title="Alt+Click to seek. Right-click for color."
+                    >
                       {word.word}
                     </span>{" "}
+                    {wordColorPickerIdx === i && (
+                      <div style={{ position: "absolute", bottom: "100%", left: "50%", transform: "translateX(-50%)", background: "#1e293b", padding: 6, borderRadius: 8, display: "flex", gap: 4, zIndex: 50, boxShadow: "0 4px 12px rgba(0,0,0,0.5)" }}>
+                         {["#FFFFFF", "#FFD700", "#FF6B35", "#00FF88", "#00FFFF", "#FF00FF", "#8b5cf6", ""].map((c) => (
+                           <div key={c} onClick={() => {
+                              const w = [...transcription.words]; w[i].color = c === "" ? undefined : c;
+                              setTranscription({ ...transcription, words: w }); setWordColorPickerIdx(null);
+                           }} style={{ width: 16, height: 16, borderRadius: "50%", cursor: "pointer", background: c || "#4b5563", border: c === "" ? "1px solid #94a3b8" : "none", display: c === "" ? "flex" : "block", alignItems: "center", justifyContent: "center", fontSize: 10 }}>
+                             {c === "" && "✕"}
+                           </div>
+                         ))}
+                      </div>
+                    )}
                   </span>
                 );
               })
@@ -508,10 +550,12 @@ export default function StudioPage() {
 
           <div className="preview-container">
             {video.url ? (
-              <div className="preview-wrapper">
-                <video ref={videoRef} src={video.url} className={`preview-video ratio-${aspectRatio.replace(":", "-")}`} onClick={togglePlay} playsInline />
+              <div className="preview-wrapper" style={{ cursor: isDraggingCanvas ? "grabbing" : "grab" }}
+                onMouseDown={handleCanvasMouseDown} onMouseMove={handleCanvasMouseMove}
+                onMouseUp={handleCanvasMouseUp} onMouseLeave={handleCanvasMouseUp}>
+                <video ref={videoRef} src={video.url} className={`preview-video ratio-${aspectRatio.replace(":", "-")}`} playsInline />
                 <canvas ref={captionCanvasRef} className="caption-overlay" />
-                <div className="play-btn-overlay">{isPlaying ? "⏸" : "▶"}</div>
+                <div className="play-btn-overlay" onClick={togglePlay} style={{ cursor: "pointer", pointerEvents: "auto" }}>{isPlaying ? "⏸" : "▶"}</div>
               </div>
             ) : (
               <div className="preview-empty">

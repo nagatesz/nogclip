@@ -156,7 +156,7 @@
 /* ── LEFT PANEL (Transcript) ─────────────── */
 .panel-left {
   grid-column: 1;
-  grid-row: 1 / 3;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
   background: #0d0d18;
@@ -339,7 +339,7 @@
 /* ── RIGHT SIDEBAR ICONS ─────────────────── */
 .panel-right {
   grid-column: 3;
-  grid-row: 1 / 3;
+  grid-row: 1;
   display: flex;
   flex-direction: row;
   background: #0d0d18;
