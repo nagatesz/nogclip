@@ -17,8 +17,8 @@ export async function POST(request: NextRequest) {
     let downloadUrl: string | undefined;
 
     try {
-      const yt = await Innertube.create();
-      const info = await yt.getBasicInfo(videoId);
+      const yt = await Innertube.create({ generate_session_locally: true });
+      const info = await yt.getBasicInfo(videoId, { client: "IOS" });
       const format = info.chooseFormat({ type: 'video+audio', quality: 'best' });
       downloadUrl = format?.url;
     } catch (err: any) {
