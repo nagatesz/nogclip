@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import {
-  loadFFmpeg, extractAudio, exportClip, trimVideo,
+  loadFFmpeg, extractAudio, extractAudioChunk, exportClip, trimVideo,
   getVideoInfo, generateThumbnail, type ExportOptions, type ProgressCallback,
 } from "@/lib/ffmpeg";
 import { transcribeAudio, type TranscriptionResult } from "@/lib/transcription";
@@ -23,6 +23,9 @@ interface VideoState {
   file: File | null; url: string; duration: number;
   width: number; height: number; thumbnail: string; title: string;
 }
+
+// 30 min maximum processable duration in browser to avoid OOM
+const MAX_BROWSER_DURATION = 30 * 60; 
 
 type SidebarTab = "ai" | "captions" | "media" | "brand" | "broll" | "transitions" | "text" | "music" | null;
 
@@ -161,12 +164,22 @@ export default function StudioPage() {
 
       setStage("extracting-audio");
       setStageMessage("Extracting audio track...");
-      const audioBlob = await extractAudio(file, onFFmpegProgress);
+      
+      let extractionDuration = info.duration;
+      if (extractionDuration > MAX_BROWSER_DURATION) {
+        setStageMessage(`Extracting audio (First 30 minutes due to browser memory limits)...`);
+        extractionDuration = MAX_BROWSER_DURATION;
+        showToast("Long video detected. Analyzing the first 30 minutes.", "success");
+      }
+
+      const audioBlob = extractionDuration < info.duration 
+        ? await extractAudioChunk(file, 0, extractionDuration, onFFmpegProgress)
+        : await extractAudio(file, onFFmpegProgress);
 
       try { const wf = await generateWaveform(audioBlob, 400); setWaveformData(wf); } catch {}
 
       setStage("transcribing");
-      setStageMessage(info.duration > 600 ? "Transcribing with Whisper AI (long video — this may take a few minutes)..." : "Transcribing with Whisper AI...");
+      setStageMessage(extractionDuration > 600 ? "Transcribing with Whisper AI (long video — this may take a few minutes)..." : "Transcribing with Whisper AI...");
 
       let transcriptResult: TranscriptionResult;
       try {
@@ -549,7 +562,7 @@ export default function StudioPage() {
               <div className="preview-wrapper" style={{ cursor: isDraggingCanvas ? "grabbing" : "grab" }}
                 onMouseDown={handleCanvasMouseDown} onMouseMove={handleCanvasMouseMove}
                 onMouseUp={handleCanvasMouseUp} onMouseLeave={handleCanvasMouseUp}>
-                <video ref={videoRef} src={video.url} className={`preview-video ratio-${aspectRatio.replace(":", "-")}`} playsInline />
+                <video ref={videoRef} src={video.url} className={`preview-video ratio-${aspectRatio.replace(":", "-")} layout-${layout}`} playsInline />
                 <canvas ref={captionCanvasRef} className="caption-overlay" />
                 <div className="play-btn-overlay" onClick={togglePlay} style={{ cursor: "pointer", pointerEvents: "auto" }}>{isPlaying ? "⏸" : "▶"}</div>
               </div>
@@ -652,8 +665,8 @@ export default function StudioPage() {
                         <div className="color-picker-row">
                           <label>Text</label>
                           <input type="color" className="color-picker-input" value={captionStyle.primaryColor} onChange={e => setCaptionStyle({ ...captionStyle, primaryColor: e.target.value })} />
-                          <label>Highlight</label>
-                          <input type="color" className="color-picker-input" value={captionStyle.highlightColor} onChange={e => setCaptionStyle({ ...captionStyle, highlightColor: e.target.value })} />
+                          <label>Active Word</label>
+                          <input type="color" className="color-picker-input" value={captionStyle.highlightColor} onChange={e => setCaptionStyle({ ...captionStyle, highlightColor: e.target.value })} title="Change the color of the active spoken word" />
                         </div>
                         <div className="color-picker-row">
                           <label>Outline</label>

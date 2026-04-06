@@ -299,6 +299,14 @@
 .preview-video.ratio-1-1 { width: auto; max-width: 360px; aspect-ratio: 1; }
 .preview-video.ratio-16-9 { width: 100%; max-width: 560px; aspect-ratio: 16/9; }
 
+.preview-video.layout-fill { object-fit: cover; }
+.preview-video.layout-fit { object-fit: contain; }
+.preview-video.layout-split { object-fit: cover; object-position: center top; }
+.preview-video.layout-three { object-fit: cover; object-position: 50% 20%; }
+.preview-video.layout-four { object-fit: cover; object-position: top; }
+.preview-video.layout-screenshare { object-fit: contain; background: #111; }
+.preview-video.layout-gameplay { object-fit: cover; object-position: center bottom; }
+
 .caption-overlay {
   position: absolute;
   top: 0; left: 0;

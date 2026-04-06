@@ -310,11 +310,6 @@ export default function Timeline({
 
         <div className="tl-divider" />
 
-        <button className="tl-btn-icon" title="Snap to grid">⊞</button>
-        <button className="tl-btn-icon" title="Ripple edit">⇄</button>
-
-        <div className="tl-divider" />
-
         <button className="tl-btn-icon" onClick={skipBack} title="Back 5s">
           ⏮
         </button>

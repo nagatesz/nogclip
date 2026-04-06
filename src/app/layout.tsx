@@ -21,6 +21,9 @@ export default function RootLayout({
     <html lang="en">
       <body>
         {children}
+        <style dangerouslySetInnerHTML={{ __html: `
+          #vercel-live-feedback, vercel-live-feedback { display: none !important; }
+        `}} />
       </body>
     </html>
   );
