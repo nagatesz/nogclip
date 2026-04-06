@@ -27,20 +27,20 @@ const FILLER_WORDS = new Set([
 ]);
 
 // Max body size for Vercel functions is 4.5MB. 
-// 5 minutes of 64kbps MP3 is ~2.4MB.
-const MAX_CHUNK_DURATION = 300; // 5 minutes per chunk
+// 2 minutes of 16kHz mono 16-bit WAV is ~3.84MB (under 4.5MB max).
+const MAX_CHUNK_DURATION = 120; // 2 minutes per chunk
 
 export async function transcribeAudio(
   audioBlob: Blob
 ): Promise<TranscriptionResult> {
-  // Check audio size — if > 4MB or duration is likely long, chunk it
+  // Check audio size — if > 4MB chunk it
   if (audioBlob.size > 4 * 1024 * 1024) {
     return transcribeChunked(audioBlob);
   }
 
   // Single-shot transcription for short videos
   const formData = new FormData();
-  formData.append("file", audioBlob, "audio.mp3");
+  formData.append("file", audioBlob, "audio.wav");
 
   const response = await fetch("/api/transcribe", {
     method: "POST",
@@ -58,9 +58,9 @@ export async function transcribeAudio(
 async function transcribeChunked(
   audioBlob: Blob
 ): Promise<TranscriptionResult> {
-  // For long videos: estimate duration from mp3 size roughly
-  // 64kbps MP3 = 8000 bytes/sec
-  const estimatedDuration = audioBlob.size / 8000;
+  // For long videos: mathematically precise WAV chunking 
+  // 16kHz, 16-bit mono WAV = 32000 bytes/sec + 44 byte header
+  const estimatedDuration = (audioBlob.size - 44) / 32000;
   const numChunks = Math.ceil(estimatedDuration / MAX_CHUNK_DURATION);
 
   const allSegments: TranscriptSegment[] = [];
@@ -68,18 +68,41 @@ async function transcribeChunked(
   let fullText = "";
   let language = "en";
 
-  const chunkSize = Math.ceil(audioBlob.size / numChunks);
+  const chunkBytes = MAX_CHUNK_DURATION * 32000; // exact bytes per chunk
 
   for (let i = 0; i < numChunks; i++) {
-    const startByte = i * chunkSize;
-    const endByte = Math.min((i + 1) * chunkSize, audioBlob.size);
+    const startByte = i === 0 ? 0 : 44 + i * chunkBytes;
+    const endByte = Math.min(44 + (i + 1) * chunkBytes, audioBlob.size);
+    const audioDataSize = endByte - Math.max(44, startByte);
     const timeOffset = i * MAX_CHUNK_DURATION;
 
-    // For raw MP3, we can just slice the blob and send it
-    const chunkBlob = audioBlob.slice(startByte, endByte, "audio/mp3");
+    let chunkBlob: Blob;
+    if (i === 0) {
+      chunkBlob = audioBlob.slice(0, endByte, "audio/wav");
+    } else {
+      const audioData = audioBlob.slice(startByte, endByte);
+      // Build a perfect 44-byte WAV header: 16kHz, 16-bit, mono
+      const header = new ArrayBuffer(44);
+      const view = new DataView(header);
+      const writeStr = (o: number, s: string) => { for (let c = 0; c < s.length; c++) view.setUint8(o + c, s.charCodeAt(c)); };
+      writeStr(0, "RIFF");
+      view.setUint32(4, 36 + audioDataSize, true);
+      writeStr(8, "WAVE");
+      writeStr(12, "fmt ");
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, 16000, true);
+      view.setUint32(28, 32000, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      writeStr(36, "data");
+      view.setUint32(40, audioDataSize, true);
+      chunkBlob = new Blob([header, audioData], { type: "audio/wav" });
+    }
 
     const formData = new FormData();
-    formData.append("file", chunkBlob, `audio_chunk_${i}.mp3`);
+    formData.append("file", chunkBlob, `audio_chunk_${i}.wav`);
 
     try {
       const response = await fetch("/api/transcribe", {

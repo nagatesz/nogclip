@@ -85,7 +85,7 @@ export async function extractAudio(
   onProgress?.(0, "Extracting audio...");
 
   const inputName = "input" + getExtension(videoFile.name);
-  const outputName = "audio.mp3";
+  const outputName = "audio.wav";
 
   await ffmpeg.writeFile(inputName, await fetchFile(videoFile));
   await ffmpeg.exec([
@@ -93,13 +93,11 @@ export async function extractAudio(
     inputName,
     "-vn",
     "-acodec",
-    "libmp3lame",
+    "pcm_s16le",
     "-ar",
     "16000",
     "-ac",
     "1",
-    "-b:a",
-    "64k",
     outputName,
   ]);
 
@@ -109,7 +107,7 @@ export async function extractAudio(
 
   onProgress?.(100, "Audio extracted");
   // @ts-expect-error FFmpeg FileData Uint8Array is runtime-compatible with BlobPart
-  return new Blob([data], { type: "audio/mp3" });
+  return new Blob([data], { type: "audio/wav" });
 }
 
 export async function extractAudioChunk(
@@ -121,7 +119,7 @@ export async function extractAudioChunk(
   const ffmpeg = await loadFFmpeg(onProgress);
 
   const inputName = "input" + getExtension(videoFile.name);
-  const outputName = `chunk_${startSec}.mp3`;
+  const outputName = `chunk_${startSec}.wav`;
 
   await ffmpeg.writeFile(inputName, await fetchFile(videoFile));
   await ffmpeg.exec([
@@ -133,13 +131,11 @@ export async function extractAudioChunk(
     durationSec.toString(),
     "-vn",
     "-acodec",
-    "libmp3lame",
+    "pcm_s16le",
     "-ar",
     "16000",
     "-ac",
     "1",
-    "-b:a",
-    "64k",
     outputName,
   ]);
 
@@ -148,7 +144,7 @@ export async function extractAudioChunk(
   await ffmpeg.deleteFile(outputName);
 
   // @ts-expect-error FFmpeg FileData Uint8Array is runtime-compatible with BlobPart
-  return new Blob([data], { type: "audio/mp3" });
+  return new Blob([data], { type: "audio/wav" });
 }
 
 export async function trimVideo(
