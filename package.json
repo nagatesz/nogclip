@@ -9,12 +9,14 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@distube/ytdl-core": "^4.16.12",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
     "face-api.js": "^0.22.2",
     "next": "16.2.2",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "youtubei.js": "^17.0.1"
   },
   "devDependencies": {
     "@types/node": "^20",
