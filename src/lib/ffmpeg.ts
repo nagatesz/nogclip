@@ -84,25 +84,34 @@ export async function extractAudio(
   const ffmpeg = await loadFFmpeg(onProgress);
   onProgress?.(0, "Extracting audio...");
 
-  const inputName = "input" + getExtension(videoFile.name);
   const outputName = "audio.wav";
+  
+  try { await ffmpeg.createDir("/worker"); } catch {}
+  try { await ffmpeg.unmount("/worker"); } catch {}
+  
+  await ffmpeg.mount("WORKERFS" as any, { blobs: [{ name: "input.mp4", data: videoFile }] }, "/worker");
 
-  await ffmpeg.writeFile(inputName, await fetchFile(videoFile));
-  await ffmpeg.exec([
-    "-i",
-    inputName,
-    "-vn",
-    "-acodec",
-    "pcm_s16le",
-    "-ar",
-    "16000",
-    "-ac",
-    "1",
-    outputName,
-  ]);
+  try {
+    await ffmpeg.exec([
+      "-i",
+      "/worker/input.mp4",
+      "-vn",
+      "-acodec",
+      "pcm_s16le",
+      "-ar",
+      "16000",
+      "-ac",
+      "1",
+      outputName,
+    ]);
+  } catch (e: any) {
+    if (!e?.message?.includes("Aborted") && e !== "Aborted") throw e;
+    console.warn("FFmpeg Aborted() logic caught, checking if output succeeded.");
+  } finally {
+    try { await ffmpeg.unmount("/worker"); } catch {}
+  }
 
   const data = (await ffmpeg.readFile(outputName)) as Uint8Array;
-  await ffmpeg.deleteFile(inputName);
   await ffmpeg.deleteFile(outputName);
 
   onProgress?.(100, "Audio extracted");
@@ -118,29 +127,37 @@ export async function extractAudioChunk(
 ): Promise<Blob> {
   const ffmpeg = await loadFFmpeg(onProgress);
 
-  const inputName = "input" + getExtension(videoFile.name);
   const outputName = `chunk_${startSec}.wav`;
 
-  await ffmpeg.writeFile(inputName, await fetchFile(videoFile));
-  await ffmpeg.exec([
-    "-i",
-    inputName,
-    "-ss",
-    startSec.toString(),
-    "-t",
-    durationSec.toString(),
-    "-vn",
-    "-acodec",
-    "pcm_s16le",
-    "-ar",
-    "16000",
-    "-ac",
-    "1",
-    outputName,
-  ]);
+  try { await ffmpeg.createDir("/worker"); } catch {}
+  try { await ffmpeg.unmount("/worker"); } catch {}
+  
+  await ffmpeg.mount("WORKERFS" as any, { blobs: [{ name: "input.mp4", data: videoFile }] }, "/worker");
+
+  try {
+    await ffmpeg.exec([
+      "-i",
+      "/worker/input.mp4",
+      "-ss",
+      startSec.toString(),
+      "-t",
+      durationSec.toString(),
+      "-vn",
+      "-acodec",
+      "pcm_s16le",
+      "-ar",
+      "16000",
+      "-ac",
+      "1",
+      outputName,
+    ]);
+  } catch (e: any) {
+    if (!e?.message?.includes("Aborted") && e !== "Aborted") throw e;
+  } finally {
+    try { await ffmpeg.unmount("/worker"); } catch {}
+  }
 
   const data = (await ffmpeg.readFile(outputName)) as Uint8Array;
-  await ffmpeg.deleteFile(inputName);
   await ffmpeg.deleteFile(outputName);
 
   // @ts-expect-error FFmpeg FileData Uint8Array is runtime-compatible with BlobPart
@@ -149,127 +166,131 @@ export async function extractAudioChunk(
 
 export async function trimVideo(
   videoFile: File,
-  startTime: number,
-  endTime: number,
+  options: TrimOptions,
   onProgress?: ProgressCallback
 ): Promise<Blob> {
   const ffmpeg = await loadFFmpeg(onProgress);
+
+  const outputName = "output.mp4";
+
+  try { await ffmpeg.createDir("/worker"); } catch {}
+  try { await ffmpeg.unmount("/worker"); } catch {}
+  
+  await ffmpeg.mount("WORKERFS" as any, { blobs: [{ name: "input.mp4", data: videoFile }] }, "/worker");
+
   onProgress?.(0, "Trimming video...");
 
-  const inputName = "input" + getExtension(videoFile.name);
-  const outputName = "trimmed.mp4";
-
-  await ffmpeg.writeFile(inputName, await fetchFile(videoFile));
-  await ffmpeg.exec([
-    "-i",
-    inputName,
-    "-ss",
-    startTime.toString(),
-    "-to",
-    endTime.toString(),
-    "-c",
-    "copy",
-    "-avoid_negative_ts",
-    "make_zero",
-    outputName,
-  ]);
+  try {
+    await ffmpeg.exec([
+      "-v",
+      "error",
+      "-i",
+      "/worker/input.mp4",
+      "-ss",
+      options.startTime.toString(),
+      "-to",
+      options.endTime.toString(),
+      "-c:v",
+      "copy", // Copy video stream instead of re-encoding where possible
+      "-c:a",
+      "copy", // Copy audio stream
+      "-avoid_negative_ts",
+      "make_zero",
+      outputName,
+    ]);
+  } catch (e: any) {
+    if (!e?.message?.includes("Aborted") && e !== "Aborted") throw e;
+  } finally {
+    try { await ffmpeg.unmount("/worker"); } catch {}
+  }
 
   const data = (await ffmpeg.readFile(outputName)) as Uint8Array;
-  await ffmpeg.deleteFile(inputName);
   await ffmpeg.deleteFile(outputName);
 
-  onProgress?.(100, "Trim complete");
-  // @ts-expect-error FFmpeg FileData Uint8Array is runtime-compatible with BlobPart
+  onProgress?.(100, "Done");
+  // @ts-expect-error Types
   return new Blob([data], { type: "video/mp4" });
 }
 
-export async function exportClip(
+export async function exportVideo(
   videoFile: File,
-  options: ExportOptions,
+  opts: ExportOptions,
   onProgress?: ProgressCallback
 ): Promise<Blob> {
   const ffmpeg = await loadFFmpeg(onProgress);
-  onProgress?.(0, "Preparing export...");
+  onProgress?.(0, "Initializing export...");
 
-  const inputName = "input" + getExtension(videoFile.name);
   const outputName = "output.mp4";
 
-  await ffmpeg.writeFile(inputName, await fetchFile(videoFile));
+  try { await ffmpeg.createDir("/worker"); } catch {}
+  try { await ffmpeg.unmount("/worker"); } catch {}
+  
+  await ffmpeg.mount("WORKERFS" as any, { blobs: [{ name: "input.mp4", data: videoFile }] }, "/worker");
+
+  // Subtitle burn-in
+  if (opts.captionFile) {
+    await ffmpeg.writeFile("captions.ass", opts.captionFile);
+  }
 
   const args: string[] = [];
 
-  // Input-seek: place -ss BEFORE -i for fast seeking (avoids decoding from start)
-  if (options.trimStart !== undefined && options.trimStart > 0) {
-    args.push("-ss", options.trimStart.toString());
+  // Input-seek: place -ss BEFORE -i for fast seeking
+  if (opts.trimStart !== undefined && opts.trimStart > 0) {
+    args.push("-ss", opts.trimStart.toString());
   }
-  args.push("-i", inputName);
+  args.push("-i", "/worker/input.mp4");
 
-  // -t is duration from seek point (not absolute end time) when using input-seek
-  if (options.trimStart !== undefined && options.trimEnd !== undefined) {
-    const duration = options.trimEnd - options.trimStart;
+  if (opts.trimStart !== undefined && opts.trimEnd !== undefined) {
+    const duration = opts.trimEnd - opts.trimStart;
     if (duration > 0) args.push("-t", duration.toString());
-  } else if (options.trimEnd !== undefined && (options.trimStart === undefined || options.trimStart === 0)) {
-    args.push("-t", options.trimEnd.toString());
+  } else if (opts.trimEnd !== undefined && (opts.trimStart === undefined || opts.trimStart === 0)) {
+    args.push("-t", opts.trimEnd.toString());
   }
 
   // Video filters
   const filters: string[] = [];
-
-  // Aspect ratio conversion
   const resMap = {
     "720p": { "9:16": "720:1280", "1:1": "720:720", "16:9": "1280:720" },
-    "1080p": {
-      "9:16": "1080:1920",
-      "1:1": "1080:1080",
-      "16:9": "1920:1080",
-    },
+    "1080p": { "9:16": "1080:1920", "1:1": "1080:1080", "16:9": "1920:1080" },
   };
-  const resolution = resMap[options.quality][options.aspectRatio];
-  filters.push(
-    `scale=${resolution}:force_original_aspect_ratio=decrease,pad=${resolution}:(ow-iw)/2:(oh-ih)/2:black`
-  );
+  const resolution = resMap[opts.quality][opts.aspectRatio];
+  filters.push(`scale=${resolution}:force_original_aspect_ratio=decrease,pad=${resolution}:(ow-iw)/2:(oh-ih)/2:black`);
+
+  if (opts.captionFile) {
+    filters.push("ass=captions.ass");
+  }
 
   if (filters.length > 0) {
     args.push("-vf", filters.join(","));
   }
 
-  // Subtitle burn-in
-  if (options.captionFile) {
-    await ffmpeg.writeFile("captions.ass", options.captionFile);
-    const existingVf = args.indexOf("-vf");
-    if (existingVf >= 0) {
-      args[existingVf + 1] = args[existingVf + 1] + ",ass=captions.ass";
-    } else {
-      args.push("-vf", "ass=captions.ass");
-    }
-  }
-
   args.push(
-    "-c:v",
-    "libx264",
-    "-preset",
-    "fast",
-    "-crf",
-    "23",
-    "-c:a",
-    "aac",
-    "-b:a",
-    "128k",
-    "-movflags",
-    "+faststart",
-    "-y",
-    outputName
+    "-c:v", "libx264",
+    "-preset", "fast",
+    "-crf", "23",
+    "-c:a", "aac",
+    "-b:a", "128k",
+    "-movflags", "+faststart",
+    "-y", outputName
   );
 
   onProgress?.(10, "Encoding video...");
-  await ffmpeg.exec(args);
+
+  try {
+    await ffmpeg.exec(args);
+  } catch (e: any) {
+    if (!e?.message?.includes("Aborted") && e !== "Aborted") throw e;
+  } finally {
+    try { await ffmpeg.unmount("/worker"); } catch {}
+  }
 
   const data = (await ffmpeg.readFile(outputName)) as Uint8Array;
-  await ffmpeg.deleteFile(inputName);
   await ffmpeg.deleteFile(outputName);
 
+  if (opts.captionFile) try { await ffmpeg.deleteFile("captions.ass"); } catch {}
+
   onProgress?.(100, "Export complete!");
-  // @ts-expect-error FFmpeg FileData Uint8Array is runtime-compatible with BlobPart
+  // @ts-expect-error Types
   return new Blob([data], { type: "video/mp4" });
 }
 
