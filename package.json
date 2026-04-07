@@ -13,6 +13,7 @@
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
     "face-api.js": "^0.22.2",
+    "idb": "^8.0.3",
     "next": "16.2.2",
     "react": "19.2.4",
     "react-dom": "19.2.4",

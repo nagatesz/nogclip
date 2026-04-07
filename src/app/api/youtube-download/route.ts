@@ -21,8 +21,8 @@ const COBALT_INSTANCES = [
   "https://cobalt.cjs.nz/"
 ];
 
-async function fetchFromCobalt(videoUrl: string): Promise<CobaltResponse | null> {
-  const bodyPayload = JSON.stringify({ url: videoUrl });
+async function fetchFromCobalt(videoUrl: string, options: any = {}): Promise<CobaltResponse | null> {
+  const bodyPayload = JSON.stringify({ url: videoUrl, ...options });
   
   for (const instance of COBALT_INSTANCES) {
     try {
@@ -57,7 +57,9 @@ export async function POST(request: NextRequest) {
     const match = url.match(ytRegex);
     if (!match || !match[5]) return NextResponse.json({ error: "Invalid YouTube URL" }, { status: 400 });
 
-    const cobaltData = await fetchFromCobalt(url);
+    const requestOptions = proxyStream ? {} : { downloadMode: "audio" };
+    // We send proxyStream = false to Cobalt to ensure no audio+video mux wait time if client just wants raw stream
+    const cobaltData = await fetchFromCobalt(url, requestOptions);
     
     if (!cobaltData?.url) {
       return NextResponse.json({ error: "Download service unavailable. Please upload the video directly." }, { status: 502 });

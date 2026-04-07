@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { getClip, getProject } from "@/lib/db";
 import {
   loadFFmpeg, extractAudio, extractAudioChunk, exportClip, trimVideo,
   getVideoInfo, generateThumbnail, type ExportOptions, type ProgressCallback,
@@ -42,7 +44,10 @@ const LAYOUT_DEFS: { id: LayoutType | "screenshare" | "gameplay"; label: string;
   { id: "gameplay", label: "Gameplay", icon: <div style={{ width: 22, height: 36, border: "1.5px solid currentColor", borderRadius: 3, display: "flex", flexDirection: "column", overflow: "hidden" }}><div style={{ flex: 2, background: "currentColor", opacity: 0.3 }} /><div style={{ flex: 1, borderTop: "1.5px solid currentColor", background: "currentColor", opacity: 0.15 }} /></div> },
 ];
 
-export default function StudioPage() {
+function StudioInner() {
+  const searchParams = useSearchParams();
+  const clipId = searchParams.get("clipId");
+
   const [stage, setStage] = useState<ProcessingStage>("idle");
   const [stageMessage, setStageMessage] = useState("");
   const [error, setError] = useState("");
@@ -140,6 +145,41 @@ export default function StudioPage() {
     const activeWord = transcriptBodyRef.current.querySelector(".transcript-word.active");
     if (activeWord) activeWord.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [currentTime, transcription]);
+
+  useEffect(() => {
+    if (!clipId) return;
+    async function loadClipFromDB() {
+      try {
+        setStage("loading-ffmpeg");
+        setStageMessage("Loading AI clip...");
+        const clip = await getClip(clipId!);
+        if (!clip) throw new Error("Clip not found");
+        const proj = await getProject(clip.projectId);
+        if (!proj) throw new Error("Project not found");
+
+        const dir = await navigator.storage.getDirectory();
+        const cacheDir = await dir.getDirectoryHandle('video-cache');
+        const fileHandle = await cacheDir.getFileHandle(`video-${proj.id}.mp4`);
+        const file = await fileHandle.getFile();
+
+        const url = URL.createObjectURL(file);
+        // We set duration locally so timeline isn't completely massive
+        setVideo({ file, url, duration: proj.duration || 0, width: 1080, height: 1920, thumbnail: proj.thumbnailUrl || "", title: clip.title });
+        setTranscription(clip.transcriptChunk);
+        setTrimStart(clip.startTime);
+        setTrimEnd(clip.endTime);
+        setClips([clip as unknown as ClipSuggestion]);
+        setSelectedClip(clip as unknown as ClipSuggestion);
+        setStage("ready");
+        showToast("AI Clip Loaded Successfully! 🚀");
+        setSidebarTab("captions");
+      } catch (err: any) {
+        setStage("error");
+        setError("Failed to load clip from local storage. Did you clear your browser data? " + err.message);
+      }
+    }
+    loadClipFromDB();
+  }, [clipId]);
 
   const processVideo = useCallback(async (file: File, title?: string) => {
     setError("");
@@ -848,5 +888,13 @@ export default function StudioPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function StudioPage() {
+  return (
+    <Suspense fallback={<div style={{height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0a0a0a', color: '#fff'}}>Loading Studio...</div>}>
+      <StudioInner />
+    </Suspense>
   );
 }
