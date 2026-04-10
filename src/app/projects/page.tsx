@@ -49,17 +49,16 @@ export default function ProjectsDashboard() {
         await updateProject(projectId, { status: "initializing", progressMessage: "Fetching YouTube Metadata...", progress: 5 });
         const ytData = await resolveYoutubeUrlServerSide(ytUrl);
         await updateProject(projectId, { title: ytData.title || "YouTube Video", thumbnailUrl: ytData.thumbnail });
-        streamUrl = ytData.url;
-        useProxy = ytData.useProxy || false;
+        
+        // YouTube blocks server-side downloads - user must upload manually
+        throw new Error("YouTube blocks automated downloads. Please download the video manually using a tool like youtube-dl or a browser extension, then use the '📂 Upload File' button to upload it.");
       }
 
-      // --- 2. Handle data saving (from URL or File) ---
+      // --- 2. Handle data saving (from File) ---
       let file: File;
       if (typeof input === "string") {
-        await updateProject(projectId, { status: "extracting", progressMessage: "Downloading safely to local disk...", progress: 20 });
-        file = await streamUrlToOPFS(streamUrl, `video-${projectId}.mp4`, (msg) => {
-           updateProject(projectId, { progressMessage: msg });
-        }, useProxy);
+        // This should not be reached due to the error above
+        throw new Error("YouTube downloads are not supported. Please upload the file directly.");
       } else {
         await updateProject(projectId, { status: "extracting", progressMessage: "Saving local file to workspace...", progress: 20 });
         file = input; 
