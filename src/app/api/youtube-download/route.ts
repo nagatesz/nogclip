@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
-export const maxDuration = 10; // Forced lower for Hobby safety
+export const maxDuration = 10; 
 
 interface CobaltResponse {
   status: string;
@@ -10,30 +10,38 @@ interface CobaltResponse {
   picker?: Array<{ url: string; type: string }>;
 }
 
+/**
+ * Community Instances (Updated list without blocked official api.cobalt.tools)
+ */
 const COBALT_INSTANCES = [
-  "https://api.cobalt.tools/",
   "https://co.eepy.ovh/",
   "https://cobalt.squair.xyz/",
   "https://dl.woof.monster/",
   "https://cobalt.clxxped.lol/",
+  "https://cobalt.meowing.de/",
+  "https://cobalt.blackcat.sweeux.org/",
 ];
 
-/**
- * Parallel Resolution Pattern: Try the most reliable instances at once.
- * First one to return a valid URL wins.
- */
 async function fetchFromCobalt(videoUrl: string, options: any = {}): Promise<CobaltResponse | null> {
-  const bodyPayload = JSON.stringify({ url: videoUrl, ...options });
+  const bodyPayload = JSON.stringify({ 
+    url: videoUrl, 
+    ...options,
+    filenameStyle: "pretty", // Compatibility
+  });
   
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s total timeout
+  const timeoutId = setTimeout(() => controller.abort(), 6500); // 6.5s race timeout
 
   try {
     const promises = COBALT_INSTANCES.map(async (instance) => {
       try {
         const res = await fetch(instance, {
           method: "POST",
-          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          headers: { 
+            Accept: "application/json", 
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Nogclip/1.1)" 
+          },
           body: bodyPayload,
           signal: controller.signal,
         });
@@ -46,11 +54,9 @@ async function fetchFromCobalt(videoUrl: string, options: any = {}): Promise<Cob
       }
     });
 
-    // Race for the first successful result
-    const result = await Promise.any(promises);
-    return result;
+    return await Promise.any(promises);
   } catch (err) {
-    console.error("All Cobalt instances failed or timed out.");
+    console.error("Ingestion failed: all instances rejected or timed out.");
     return null;
   } finally {
     clearTimeout(timeoutId);
@@ -62,40 +68,44 @@ export async function POST(request: NextRequest) {
     const { url, proxyStream } = await request.json();
     if (!url) return NextResponse.json({ error: "No URL provided" }, { status: 400 });
 
-    // Robust ID extraction
     const idMatch = url.match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([a-zA-Z0-9_-]{11})/);
     const videoId = idMatch?.[1];
     if (!videoId) return NextResponse.json({ error: "Invalid YouTube URL" }, { status: 400 });
 
-    const requestOptions = proxyStream ? {} : { downloadMode: "audio", isAudioOnly: true, aFormat: "mp3" };
+    // Cobalt v11+ Parameters
+    const requestOptions = proxyStream ? {
+      videoQuality: "1080",
+    } : { 
+      downloadMode: "audio", 
+      audioFormat: "mp3",
+      isAudioOnly: true 
+    };
+
     const cobaltData = await fetchFromCobalt(url, requestOptions);
     
     if (!cobaltData?.url) {
-      return NextResponse.json({ error: "Download service unavailable. Please retry or upload a file directly." }, { status: 502 });
+      return NextResponse.json({ error: "Inlet blocked or timeout. Try pasting again in 10s." }, { status: 502 });
     }
 
     if (!proxyStream) return NextResponse.json({ url: cobaltData.url, status: "ok" });
 
-    // PROXY bytes server-side (only if proxyStream is true, e.g. for Studio)
+    // PROXY bytes (mostly for studio previews)
     const videoRes = await fetch(cobaltData.url, {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36" },
-      signal: AbortSignal.timeout(50000), // Only works if Vercel supports it (Pro/Team)
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: AbortSignal.timeout(50000), 
     });
     
-    if (!videoRes.ok) return NextResponse.json({ error: "Failed to fetch video stream" }, { status: 502 });
+    if (!videoRes.ok) return NextResponse.json({ error: "Stream unavailable" }, { status: 502 });
 
     const contentType = videoRes.headers.get("content-type") || "video/mp4";
-    const contentLength = videoRes.headers.get("content-length");
     const headers: Record<string, string> = {
       "Content-Type": contentType,
-      "Content-Disposition": 'attachment; filename="video.mp4"',
       "Cache-Control": "no-store",
     };
-    if (contentLength) headers["Content-Length"] = contentLength;
     return new NextResponse(videoRes.body, { status: 200, headers });
   } catch (error) {
     console.error("YouTube download error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: "Gateway Fault" }, { status: 500 });
   }
 }
 
@@ -108,23 +118,14 @@ export async function GET(request: NextRequest) {
     const videoId = idMatch?.[1];
     if (!videoId) return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
     
-    // Return base thumbnail URLs; client side will handle high-res fallback via onError
-    const thumbnail = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
-    const fallbackThumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-
-    let title = "YouTube Video";
-    try {
-      const oembedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`, { signal: AbortSignal.timeout(3000) });
-      if (oembedRes.ok) { 
-        const oembed = await oembedRes.json(); 
-        title = oembed.title || title; 
-      }
-    } catch { /* fallback */ }
-
-    return NextResponse.json({ videoId, title, thumbnail, fallbackThumbnail });
+    return NextResponse.json({ 
+      videoId, 
+      title: "YouTube Video", // Frontend will update this later via metadata if available
+      thumbnail: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+      fallbackThumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`
+    });
   } catch (error) {
-    console.error("Metadata fetch error:", error);
-    return NextResponse.json({ error: "Failed to fetch metadata" }, { status: 500 });
+    return NextResponse.json({ error: "Metadata Fault" }, { status: 500 });
   }
 }
 

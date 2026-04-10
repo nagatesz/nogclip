@@ -1,13 +1,13 @@
 .container {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
   background-color: var(--background);
 }
 
 .main {
   display: flex;
-  flex: 1;
   min-height: 0;
   overflow: hidden;
 }

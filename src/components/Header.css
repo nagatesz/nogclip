@@ -1,11 +1,9 @@
 /* Header */
 .header {
-  position: sticky;
-  top: 0;
-  left: 0;
-  right: 0;
+  height: 72px;
+  width: 100%;
   z-index: var(--z-sticky);
-  padding: var(--space-4) var(--space-8);
+  padding: 0 var(--space-8);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -13,11 +11,9 @@
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--border-subtle);
-  transition: all var(--transition-base);
 }
 
 .header.scrolled {
-  padding: var(--space-3) var(--space-8);
   background: rgba(10, 10, 15, 0.95);
 }
 

@@ -141,7 +141,7 @@ export default function ProjectsDashboard() {
   return (
     <div className={styles.container}>
       <Header />
-      
+      <div style={{ position: 'fixed', bottom: '10px', right: '10px', fontSize: '10px', opacity: 0.3, zIndex: 1000 }}>v1.1</div>
       <main className={styles.main}>
         <div className={styles.sidebar}>
           <div className={styles.sidebarHeader}>
