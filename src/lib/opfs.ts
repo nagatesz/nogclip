@@ -14,13 +14,23 @@ export async function streamUrlToOPFS(
   // without OPFS features, but modern Desktop Chrome/Safari supports it.
   const writable = await fileHandle.createWritable();
 
-  onProgress?.("Connecting to video stream...");
+  onProgress?.("Validating download URL...");
   
   try {
-    const res = await fetch(url, {
-      // Important: don't set mode to 'cors' for YouTube direct URLs as they may not support it
-      // ytdl-core returns direct URLs that should work
-    });
+    // First, do a HEAD request to check if the URL is valid and get content length
+    const headRes = await fetch(url, { method: 'HEAD' });
+    if (!headRes.ok) {
+      throw new Error(`URL validation failed with status ${headRes.status}`);
+    }
+    
+    const contentLength = +(headRes.headers.get('Content-Length') || 0);
+    if (contentLength === 0) {
+      throw new Error("Server reported 0 bytes - URL may be expired or invalid");
+    }
+    
+    onProgress?.("Connecting to video stream...");
+    
+    const res = await fetch(url);
     
     if (!res.ok) {
       throw new Error(`HTTP error! status: ${res.status}`);
@@ -31,9 +41,9 @@ export async function streamUrlToOPFS(
     }
 
     const reader = res.body.getReader();
-    const contentLength = +(res.headers.get('Content-Length') || 0);
     let receivedLength = 0;
     let lastProgressUpdate = 0;
+    let chunkCount = 0;
 
     onProgress?.("Downloading video...");
 
@@ -41,7 +51,12 @@ export async function streamUrlToOPFS(
       const {done, value} = await reader.read();
       if (done) break;
       
+      if (!value || value.length === 0) {
+        throw new Error("Received empty chunk during download");
+      }
+      
       receivedLength += value.length;
+      chunkCount++;
       
       // Update progress every 1 second to avoid UI spam
       const now = Date.now();
@@ -60,14 +75,20 @@ export async function streamUrlToOPFS(
 
     await writable.close();
     
-    onProgress?.("Download complete!");
+    onProgress?.("Verifying download...");
     const file = await fileHandle.getFile();
     
     // Verify file size
     if (file.size === 0) {
-      throw new Error("Downloaded file is empty");
+      throw new Error("Downloaded file is empty - the video URL may have expired or requires special authentication");
     }
     
+    // Verify we received at least some data
+    if (chunkCount === 0) {
+      throw new Error("No data chunks received during download");
+    }
+    
+    onProgress?.("Download complete!");
     return file;
   } catch (error) {
     // Clean up on error
