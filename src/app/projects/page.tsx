@@ -169,7 +169,16 @@ export default function ProjectsDashboard() {
                 >
                   <div className={styles.projectThumb}>
                     {proj.thumbnailUrl ? (
-                      <img src={proj.thumbnailUrl} alt={proj.title} />
+                      <img 
+                        src={proj.thumbnailUrl} 
+                        alt={proj.title} 
+                        onError={(e) => {
+                          const target = e.currentTarget;
+                          if (target.src.includes('maxresdefault.jpg')) {
+                             target.src = target.src.replace('maxresdefault.jpg', 'hqdefault.jpg');
+                          }
+                        }}
+                      />
                     ) : (
                       <div className={styles.thumbPlaceholder}>🎥</div>
                     )}

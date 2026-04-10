@@ -8,8 +8,8 @@
 .main {
   display: flex;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
-  height: calc(100vh - 60px);
 }
 
 .sidebar {
