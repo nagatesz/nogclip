@@ -18,18 +18,17 @@ export default function ProjectsDashboard() {
 
   const resolveYoutubeUrlClientSide = async (url: string) => {
     const instances = [
-      "https://downloadapi.stuff.solutions/",
-      "https://api.qwkuns.me/",
-      "https://cobaltapi.cjs.nz/",
       "https://api.dl.woof.monster/",
-      "https://api.cobalt.liubquanti.click/",
+      "https://api.qwkuns.me/",
       "https://cobaltapi.kittycat.boo/",
+      "https://cobaltapi.cjs.nz/",
     ];
 
     const body = {
       url: url,
       downloadMode: "audio",
       audioFormat: "mp3",
+      filenameStyle: "basic",
     };
 
     const controller = new AbortController();
@@ -51,12 +50,12 @@ export default function ProjectsDashboard() {
         } catch (e) { throw e; }
       });
 
-      const result = await Promise.any(promises);
+      const result = await Promise.race(promises); // Using race for fastest response
       clearTimeout(timeoutId);
       return result;
     } catch (err) {
       clearTimeout(timeoutId);
-      throw new Error("All community download nodes failed. Please try a different video or try again later.");
+      throw new Error("All community download nodes failed or blocked by CORS. Use the '📂 Upload File' button below to continue!");
     }
   };
 
@@ -204,7 +203,7 @@ export default function ProjectsDashboard() {
   return (
     <div className={styles.container}>
       <Header />
-      <div style={{ position: 'fixed', bottom: '10px', right: '10px', fontSize: '10px', opacity: 0.3, zIndex: 1000 }}>v1.3 (Pro Engine + Local Upload)</div>
+      <div style={{ position: 'fixed', bottom: '10px', right: '10px', fontSize: '10px', opacity: 0.3, zIndex: 1000 }}>v1.4 (Hardened Primetime)</div>
       <input 
         type="file" 
         ref={fileInputRef} 

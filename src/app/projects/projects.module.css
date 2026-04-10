@@ -1,7 +1,8 @@
 .container {
   height: 100vh;
-  display: grid;
-  grid-template-rows: auto 1fr;
+  display: grid !important; 
+  grid-template-rows: 72px 1fr !important;
+  grid-template-areas: "header" "main";
   overflow: hidden;
   background-color: var(--background);
 }

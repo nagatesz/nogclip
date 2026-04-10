@@ -1,5 +1,6 @@
 /* Header */
 .header {
+  position: relative; /* LOCKED grid anchoring */
   height: 72px;
   width: 100%;
   z-index: var(--z-sticky);
