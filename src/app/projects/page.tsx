@@ -15,13 +15,14 @@ export default function ProjectsDashboard() {
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [activeClips, setActiveClips] = useState<Clip[]>([]);
   const [loading, setLoading] = useState(true);
+  const [downloadService, setDownloadService] = useState<"cobalt" | "manual">("cobalt");
 
   const resolveYoutubeUrlServerSide = async (url: string) => {
     try {
       const res = await fetch("/api/youtube-download", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, format: "video" }),
+        body: JSON.stringify({ url, format: "video", service: downloadService }),
       });
       
       if (!res.ok) {
@@ -49,16 +50,17 @@ export default function ProjectsDashboard() {
         await updateProject(projectId, { status: "initializing", progressMessage: "Fetching YouTube Metadata...", progress: 5 });
         const ytData = await resolveYoutubeUrlServerSide(ytUrl);
         await updateProject(projectId, { title: ytData.title || "YouTube Video", thumbnailUrl: ytData.thumbnail });
-        
-        // YouTube blocks server-side downloads - user must upload manually
-        throw new Error("YouTube blocks automated downloads. Please download the video manually using a tool like youtube-dl or a browser extension, then use the '📂 Upload File' button to upload it.");
+        streamUrl = ytData.url;
+        useProxy = ytData.useProxy || false;
       }
 
-      // --- 2. Handle data saving (from File) ---
+      // --- 2. Handle data saving (from URL or File) ---
       let file: File;
       if (typeof input === "string") {
-        // This should not be reached due to the error above
-        throw new Error("YouTube downloads are not supported. Please upload the file directly.");
+        await updateProject(projectId, { status: "extracting", progressMessage: "Downloading safely to local disk...", progress: 20 });
+        file = await streamUrlToOPFS(streamUrl, `video-${projectId}.mp4`, (msg) => {
+           updateProject(projectId, { progressMessage: msg });
+        }, useProxy);
       } else {
         await updateProject(projectId, { status: "extracting", progressMessage: "Saving local file to workspace...", progress: 20 });
         file = input; 
@@ -255,6 +257,21 @@ export default function ProjectsDashboard() {
               <h2>Create a New Project</h2>
               <p>Paste a YouTube link (even 2-3 hours long!) to generate viral AI clips.</p>
               
+              <div style={{ marginTop: '1rem', marginBottom: '1rem' }}>
+                <label style={{ fontSize: '0.85rem', opacity: 0.7, marginBottom: '0.25rem', display: 'block' }}>
+                  Download Service:
+                </label>
+                <select 
+                  className="input"
+                  style={{ maxWidth: '500px', width: '100%' }}
+                  value={downloadService}
+                  onChange={(e) => setDownloadService(e.target.value as "cobalt" | "manual")}
+                >
+                  <option value="cobalt">Cobalt API (Fast, but may fail on some videos)</option>
+                  <option value="manual">Manual Upload (Most reliable)</option>
+                </select>
+              </div>
+              
               <div style={{ marginTop: '2rem', display: 'flex', gap: '0.5rem', width: '100%', maxWidth: '500px' }}>
                 <input 
                   type="text" 
@@ -287,7 +304,7 @@ export default function ProjectsDashboard() {
                 </button>
               </div>
               <p style={{ marginTop: '1rem', fontSize: '0.8rem', opacity: 0.6 }}>
-                💡 Tip: If a video is age-restricted, download it manually and upload it here.
+                💡 Tip: If Cobalt API fails, switch to Manual Upload or download the video yourself.
               </p>
             </div>
           ) : (
