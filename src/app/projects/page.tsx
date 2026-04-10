@@ -16,6 +16,50 @@ export default function ProjectsDashboard() {
   const [activeClips, setActiveClips] = useState<Clip[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const resolveYoutubeUrlClientSide = async (url: string) => {
+    const instances = [
+      "https://downloadapi.stuff.solutions/",
+      "https://api.qwkuns.me/",
+      "https://cobaltapi.cjs.nz/",
+      "https://api.dl.woof.monster/",
+      "https://api.cobalt.liubquanti.click/",
+      "https://cobaltapi.kittycat.boo/",
+    ];
+
+    const body = {
+      url: url,
+      downloadMode: "audio",
+      audioFormat: "mp3",
+    };
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s total browser timeout
+
+    try {
+      const promises = instances.map(async (base) => {
+        try {
+          const res = await fetch(base, {
+            method: "POST",
+            headers: { "Accept": "application/json", "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            signal: controller.signal
+          });
+          if (!res.ok) throw new Error("instance fail");
+          const data = await res.json();
+          if (data.status === "error" || !data.url) throw new Error("no url");
+          return data.url;
+        } catch (e) { throw e; }
+      });
+
+      const result = await Promise.any(promises);
+      clearTimeout(timeoutId);
+      return result;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      throw new Error("All community download nodes failed. Please try a different video or try again later.");
+    }
+  };
+
   const processProjectPipeline = async (projectId: string, ytUrl: string) => {
     try {
       // 1. Fetch metadata
@@ -25,20 +69,27 @@ export default function ProjectsDashboard() {
       const meta = await metaRes.json();
       await updateProject(projectId, { title: meta.title || "YouTube Video", thumbnailUrl: meta.thumbnail });
 
-      // 2. Fetch Cobalt audio-only proxy stream
-      await updateProject(projectId, { progressMessage: "Requesting audio stream...", progress: 10 });
-      const dlRes = await fetch("/api/youtube-download", { 
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: ytUrl, proxyStream: false }) 
-      });
-      if (!dlRes.ok) throw new Error("Failed to resolve YouTube stream.");
-      const dlMeta = await dlRes.json();
+      // 2. Resolve YouTube stream (Client-Side for Hobby skip)
+      await updateProject(projectId, { progressMessage: "Resolving video stream...", progress: 10 });
+      let streamUrl = "";
+      try {
+        streamUrl = await resolveYoutubeUrlClientSide(ytUrl);
+      } catch (err: any) {
+        // Fallback to server if client-side racing fails (unlikely, but safe)
+        const dlRes = await fetch("/api/youtube-download", { 
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: ytUrl, proxyStream: false }) 
+        });
+        const dlMeta = await dlRes.json();
+        if (!dlMeta.url) throw new Error(err.message || "Failed to resolve stream.");
+        streamUrl = dlMeta.url;
+      }
       
-      if (!dlMeta.url) throw new Error("No video URL returned.");
+      if (!streamUrl) throw new Error("No video URL returned.");
 
       // 3. Download to OPFS
       await updateProject(projectId, { status: "extracting", progressMessage: "Downloading safely to local disk...", progress: 20 });
-      const file = await streamUrlToOPFS(dlMeta.url, `video-${projectId}.mp4`, (msg) => {
+      const file = await streamUrlToOPFS(streamUrl, `video-${projectId}.mp4`, (msg) => {
          updateProject(projectId, { progressMessage: msg });
       });
 
@@ -141,7 +192,7 @@ export default function ProjectsDashboard() {
   return (
     <div className={styles.container}>
       <Header />
-      <div style={{ position: 'fixed', bottom: '10px', right: '10px', fontSize: '10px', opacity: 0.3, zIndex: 1000 }}>v1.1</div>
+      <div style={{ position: 'fixed', bottom: '10px', right: '10px', fontSize: '10px', opacity: 0.3, zIndex: 1000 }}>v1.2 (Client Engine)</div>
       <main className={styles.main}>
         <div className={styles.sidebar}>
           <div className={styles.sidebarHeader}>
