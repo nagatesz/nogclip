@@ -22,26 +22,36 @@ export default function ProjectsDashboard() {
       "https://api.qwkuns.me/",
       "https://cobaltapi.kittycat.boo/",
       "https://cobaltapi.cjs.nz/",
+      "https://api.cobalt.liubquanti.click/",
     ];
 
-    const body = {
-      url: url,
-      downloadMode: "audio",
-    };
-
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s total browser timeout
+    const timeoutId = setTimeout(() => controller.abort(), 18000); // 18s total browser timeout
 
     try {
       const promises = instances.map(async (base) => {
         try {
-          const res = await fetch(base, {
+          // Stage 1: Preferred Audio Payload
+          let res = await fetch(base, {
             method: "POST",
             headers: { "Accept": "application/json", "Content-Type": "application/json" },
-            body: JSON.stringify(body),
+            body: JSON.stringify({ url, downloadMode: "audio" }),
             signal: controller.signal
           });
-          const data = await res.json();
+          
+          let data = await res.json();
+          
+          // Stage 2: Minimalist Fallback (on 400 Error)
+          if (res.status === 400 || data.status === "error") {
+             res = await fetch(base, {
+                method: "POST",
+                headers: { "Accept": "application/json", "Content-Type": "application/json" },
+                body: JSON.stringify({ url }),
+                signal: controller.signal
+             });
+             data = await res.json();
+          }
+
           if (data.status === "error") {
             if (data.text?.includes("age_restricted") || data.text?.includes("403")) {
                throw new Error("AGE_RESTRICTED");
@@ -61,7 +71,7 @@ export default function ProjectsDashboard() {
       if (err.message === "AGE_RESTRICTED") {
          throw new Error("This video is age-restricted and requires login. Please download it manually and use the '📂 Upload File' button below!");
       }
-      throw new Error("All community download nodes failed. This can happen with very new or private videos. Try the '📂 Upload File' button below!");
+      throw new Error("All community download nodes failed or timed out. Please try the '📂 Upload File' button for manual bypass!");
     }
   };
 
@@ -209,7 +219,7 @@ export default function ProjectsDashboard() {
   return (
     <div className={styles.container}>
       <Header />
-      <div style={{ position: 'fixed', bottom: '10px', right: '10px', fontSize: '10px', opacity: 0.3, zIndex: 1000 }}>v1.5 (Precision Engine)</div>
+      <div style={{ position: 'fixed', bottom: '10px', right: '10px', fontSize: '10px', opacity: 0.3, zIndex: 1000 }}>v1.6 (Ultra-Resilient Engine)</div>
       <input 
         type="file" 
         ref={fileInputRef} 
