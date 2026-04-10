@@ -16,62 +16,25 @@ export default function ProjectsDashboard() {
   const [activeClips, setActiveClips] = useState<Clip[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const resolveYoutubeUrlClientSide = async (url: string) => {
-    const instances = [
-      "https://api.dl.woof.monster/",
-      "https://api.qwkuns.me/",
-      "https://cobaltapi.kittycat.boo/",
-      "https://cobaltapi.cjs.nz/",
-      "https://api.cobalt.liubquanti.click/",
-    ];
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 18000); // 18s total browser timeout
-
+  const resolveYoutubeUrlServerSide = async (url: string) => {
     try {
-      const promises = instances.map(async (base) => {
-        try {
-          // Stage 1: Preferred Audio Payload
-          let res = await fetch(base, {
-            method: "POST",
-            headers: { "Accept": "application/json", "Content-Type": "application/json" },
-            body: JSON.stringify({ url, downloadMode: "audio" }),
-            signal: controller.signal
-          });
-          
-          let data = await res.json();
-          
-          // Stage 2: Minimalist Fallback (on 400 Error)
-          if (res.status === 400 || data.status === "error") {
-             res = await fetch(base, {
-                method: "POST",
-                headers: { "Accept": "application/json", "Content-Type": "application/json" },
-                body: JSON.stringify({ url }),
-                signal: controller.signal
-             });
-             data = await res.json();
-          }
-
-          if (data.status === "error") {
-            if (data.text?.includes("age_restricted") || data.text?.includes("403")) {
-               throw new Error("AGE_RESTRICTED");
-            }
-            throw new Error(data.text || "instance fail");
-          }
-          if (!data.url) throw new Error("no url");
-          return data.url;
-        } catch (e) { throw e; }
+      const res = await fetch("/api/youtube-download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, format: "video" }),
       });
-
-      const result = await Promise.race(promises); // Using race for fastest response
-      clearTimeout(timeoutId);
-      return result;
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      if (err.message === "AGE_RESTRICTED") {
-         throw new Error("This video is age-restricted and requires login. Please download it manually and use the '📂 Upload File' button below!");
+      
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to resolve YouTube URL");
       }
-      throw new Error("All community download nodes failed or timed out. Please try the '📂 Upload File' button for manual bypass!");
+      
+      const data = await res.json();
+      if (!data.url) throw new Error("No download URL returned");
+      
+      return { url: data.url, title: data.title, thumbnail: data.thumbnail };
+    } catch (err: any) {
+      throw new Error(err.message || "Failed to resolve YouTube URL. Please try uploading the file directly.");
     }
   };
 
@@ -83,23 +46,9 @@ export default function ProjectsDashboard() {
       if (typeof input === "string") {
         // --- 1. YouTube Flow ---
         await updateProject(projectId, { status: "initializing", progressMessage: "Fetching YouTube Metadata...", progress: 5 });
-        const metaRes = await fetch(`/api/youtube-download?url=${encodeURIComponent(ytUrl)}`);
-        if (!metaRes.ok) throw new Error("Could not fetch YouTube metadata.");
-        const meta = await metaRes.json();
-        await updateProject(projectId, { title: meta.title || "YouTube Video", thumbnailUrl: meta.thumbnail });
-
-        await updateProject(projectId, { progressMessage: "Resolving video stream...", progress: 10 });
-        try {
-          streamUrl = await resolveYoutubeUrlClientSide(ytUrl);
-        } catch (err: any) {
-          const dlRes = await fetch("/api/youtube-download", { 
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: ytUrl, proxyStream: false }) 
-          });
-          const dlMeta = await dlRes.json();
-          if (!dlMeta.url) throw new Error(err.message || "Failed to resolve stream.");
-          streamUrl = dlMeta.url;
-        }
+        const ytData = await resolveYoutubeUrlServerSide(ytUrl);
+        await updateProject(projectId, { title: ytData.title || "YouTube Video", thumbnailUrl: ytData.thumbnail });
+        streamUrl = ytData.url;
       }
 
       // --- 3. Handle data saving (from URL or File) ---
@@ -262,8 +211,13 @@ export default function ProjectsDashboard() {
                         alt={proj.title} 
                         onError={(e) => {
                           const target = e.currentTarget;
+                          const videoId = proj.sourceUrl?.match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([a-zA-Z0-9_-]{11})/)?.[1];
                           if (target.src.includes('maxresdefault.jpg')) {
                              target.src = target.src.replace('maxresdefault.jpg', 'hqdefault.jpg');
+                          } else if (target.src.includes('hqdefault.jpg') && videoId) {
+                             target.src = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
+                          } else if (target.src.includes('mqdefault.jpg') && videoId) {
+                             target.src = `https://img.youtube.com/vi/${videoId}/default.jpg`;
                           }
                         }}
                       />
