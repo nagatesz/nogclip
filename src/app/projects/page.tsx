@@ -27,12 +27,10 @@ export default function ProjectsDashboard() {
     const body = {
       url: url,
       downloadMode: "audio",
-      audioFormat: "mp3",
-      filenameStyle: "basic",
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s total browser timeout
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s total browser timeout
 
     try {
       const promises = instances.map(async (base) => {
@@ -43,9 +41,14 @@ export default function ProjectsDashboard() {
             body: JSON.stringify(body),
             signal: controller.signal
           });
-          if (!res.ok) throw new Error("instance fail");
           const data = await res.json();
-          if (data.status === "error" || !data.url) throw new Error("no url");
+          if (data.status === "error") {
+            if (data.text?.includes("age_restricted") || data.text?.includes("403")) {
+               throw new Error("AGE_RESTRICTED");
+            }
+            throw new Error(data.text || "instance fail");
+          }
+          if (!data.url) throw new Error("no url");
           return data.url;
         } catch (e) { throw e; }
       });
@@ -53,9 +56,12 @@ export default function ProjectsDashboard() {
       const result = await Promise.race(promises); // Using race for fastest response
       clearTimeout(timeoutId);
       return result;
-    } catch (err) {
+    } catch (err: any) {
       clearTimeout(timeoutId);
-      throw new Error("All community download nodes failed or blocked by CORS. Use the '📂 Upload File' button below to continue!");
+      if (err.message === "AGE_RESTRICTED") {
+         throw new Error("This video is age-restricted and requires login. Please download it manually and use the '📂 Upload File' button below!");
+      }
+      throw new Error("All community download nodes failed. This can happen with very new or private videos. Try the '📂 Upload File' button below!");
     }
   };
 
@@ -203,7 +209,7 @@ export default function ProjectsDashboard() {
   return (
     <div className={styles.container}>
       <Header />
-      <div style={{ position: 'fixed', bottom: '10px', right: '10px', fontSize: '10px', opacity: 0.3, zIndex: 1000 }}>v1.4 (Hardened Primetime)</div>
+      <div style={{ position: 'fixed', bottom: '10px', right: '10px', fontSize: '10px', opacity: 0.3, zIndex: 1000 }}>v1.5 (Precision Engine)</div>
       <input 
         type="file" 
         ref={fileInputRef} 
