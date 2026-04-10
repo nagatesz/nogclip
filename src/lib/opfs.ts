@@ -1,7 +1,8 @@
 export async function streamUrlToOPFS(
   url: string,
   fileName: string,
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  useProxy: boolean = false
 ): Promise<File> {
   const dir = await navigator.storage.getDirectory();
   
@@ -14,23 +15,37 @@ export async function streamUrlToOPFS(
   // without OPFS features, but modern Desktop Chrome/Safari supports it.
   const writable = await fileHandle.createWritable();
 
-  onProgress?.("Validating download URL...");
+  // Use server-side proxy if requested
+  const downloadUrl = useProxy ? `/api/youtube-download?proxy=true` : url;
+
+  onProgress?.(useProxy ? "Connecting to server proxy..." : "Validating download URL...");
   
   try {
-    // First, do a HEAD request to check if the URL is valid and get content length
-    const headRes = await fetch(url, { method: 'HEAD' });
-    if (!headRes.ok) {
-      throw new Error(`URL validation failed with status ${headRes.status}`);
+    let contentLength = 0;
+    
+    if (useProxy) {
+      // For proxy, we don't do a HEAD request - just start the download
+      onProgress?.("Starting proxy download...");
+    } else {
+      // First, do a HEAD request to check if the URL is valid and get content length
+      const headRes = await fetch(url, { method: 'HEAD' });
+      if (!headRes.ok) {
+        throw new Error(`URL validation failed with status ${headRes.status}`);
+      }
+      
+      contentLength = +(headRes.headers.get('Content-Length') || 0);
+      if (contentLength === 0) {
+        throw new Error("Server reported 0 bytes - URL may be expired or invalid");
+      }
+      
+      onProgress?.("Connecting to video stream...");
     }
     
-    const contentLength = +(headRes.headers.get('Content-Length') || 0);
-    if (contentLength === 0) {
-      throw new Error("Server reported 0 bytes - URL may be expired or invalid");
-    }
-    
-    onProgress?.("Connecting to video stream...");
-    
-    const res = await fetch(url);
+    const res = await fetch(downloadUrl, useProxy ? {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ videoUrl: url })
+    } : undefined);
     
     if (!res.ok) {
       throw new Error(`HTTP error! status: ${res.status}`);

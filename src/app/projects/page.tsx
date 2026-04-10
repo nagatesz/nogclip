@@ -32,7 +32,7 @@ export default function ProjectsDashboard() {
       const data = await res.json();
       if (!data.url) throw new Error("No download URL returned");
       
-      return { url: data.url, title: data.title, thumbnail: data.thumbnail };
+      return { url: data.url, title: data.title, thumbnail: data.thumbnail, useProxy: data.useProxy };
     } catch (err: any) {
       throw new Error(err.message || "Failed to resolve YouTube URL. Please try uploading the file directly.");
     }
@@ -42,6 +42,7 @@ export default function ProjectsDashboard() {
     try {
       let ytUrl = typeof input === "string" ? input : "";
       let streamUrl = "";
+      let useProxy = false;
       
       if (typeof input === "string") {
         // --- 1. YouTube Flow ---
@@ -49,24 +50,23 @@ export default function ProjectsDashboard() {
         const ytData = await resolveYoutubeUrlServerSide(ytUrl);
         await updateProject(projectId, { title: ytData.title || "YouTube Video", thumbnailUrl: ytData.thumbnail });
         streamUrl = ytData.url;
+        useProxy = ytData.useProxy || false;
       }
 
-      // --- 3. Handle data saving (from URL or File) ---
+      // --- 2. Handle data saving (from URL or File) ---
       let file: File;
       if (typeof input === "string") {
         await updateProject(projectId, { status: "extracting", progressMessage: "Downloading safely to local disk...", progress: 20 });
         file = await streamUrlToOPFS(streamUrl, `video-${projectId}.mp4`, (msg) => {
            updateProject(projectId, { progressMessage: msg });
-        });
+        }, useProxy);
       } else {
         await updateProject(projectId, { status: "extracting", progressMessage: "Saving local file to workspace...", progress: 20 });
-        // Wrap local file in OPFS for consistency if needed, but for now we can use it directly if it's small, 
-        // or write it to OPFS for large file support (recommended).
         file = input; 
         await updateProject(projectId, { title: file.name, progress: 30 });
       }
 
-      // --- 4. Extract Audio ---
+      // --- 3. Extract Audio ---
       await updateProject(projectId, { progressMessage: "Parsing Audio...", progress: 40 });
       const info = await getVideoInfo(file);
       await updateProject(projectId, { duration: info.duration });

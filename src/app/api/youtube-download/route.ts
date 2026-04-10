@@ -7,6 +7,7 @@ export const maxDuration = 300; // 5 minutes for long video downloads
 /**
  * Multi-fallback YouTube download API
  * Tries multiple methods in order: youtubei.js -> Cobalt API -> Suggest file upload
+ * Also provides proxy endpoint for actual video downloads
  */
 
 const COBALT_INSTANCES = [
@@ -104,6 +105,51 @@ async function tryCobaltAPI(url: string, format: string) {
 }
 
 export async function POST(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const proxy = searchParams.get("proxy");
+  
+  // If proxy=true, handle actual video download through server
+  if (proxy === "true") {
+    try {
+      const { videoUrl } = await request.json();
+      if (!videoUrl) return NextResponse.json({ error: "No video URL" }, { status: 400 });
+
+      console.log("Proxying video download for:", videoUrl);
+      
+      const videoRes = await fetch(videoUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+        signal: AbortSignal.timeout(290000), // 4:50 timeout (under 5 min max)
+      });
+      
+      if (!videoRes.ok) {
+        console.error("Proxy fetch failed:", videoRes.status, videoRes.statusText);
+        return NextResponse.json({ error: `Failed to fetch video: ${videoRes.status}` }, { status: videoRes.status });
+      }
+      
+      if (!videoRes.body) {
+        return NextResponse.json({ error: "No response body" }, { status: 500 });
+      }
+
+      // Stream the video to the client
+      const contentType = videoRes.headers.get("content-type") || "video/mp4";
+      const contentLength = videoRes.headers.get("content-length");
+      
+      const headers: Record<string, string> = {
+        "Content-Type": contentType,
+        "Cache-Control": "no-cache",
+      };
+      if (contentLength) headers["Content-Length"] = contentLength;
+      
+      return new NextResponse(videoRes.body, { status: 200, headers });
+    } catch (error: any) {
+      console.error("Proxy error:", error);
+      return NextResponse.json({ error: error.message || "Proxy failed" }, { status: 500 });
+    }
+  }
+
+  // Normal flow: get download URL
   try {
     const { url, format = "video" } = await request.json();
     if (!url) return NextResponse.json({ error: "No URL" }, { status: 400 });
@@ -118,7 +164,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ 
         ...result,
         thumbnail: result.thumbnail || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
-        status: "ok"
+        status: "ok",
+        useProxy: true // Tell client to use proxy endpoint
       });
     }
 
@@ -128,7 +175,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ 
         ...result,
         thumbnail: result.thumbnail || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
-        status: "ok"
+        status: "ok",
+        useProxy: true
       });
     }
 
