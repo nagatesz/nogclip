@@ -60,40 +60,49 @@ export default function ProjectsDashboard() {
     }
   };
 
-  const processProjectPipeline = async (projectId: string, ytUrl: string) => {
+  const processProjectPipeline = async (projectId: string, input: string | File) => {
     try {
-      // 1. Fetch metadata
-      await updateProject(projectId, { status: "initializing", progressMessage: "Fetching YouTube Metadata...", progress: 5 });
-      const metaRes = await fetch(`/api/youtube-download?url=${encodeURIComponent(ytUrl)}`);
-      if (!metaRes.ok) throw new Error("Could not fetch YouTube metadata.");
-      const meta = await metaRes.json();
-      await updateProject(projectId, { title: meta.title || "YouTube Video", thumbnailUrl: meta.thumbnail });
-
-      // 2. Resolve YouTube stream (Client-Side for Hobby skip)
-      await updateProject(projectId, { progressMessage: "Resolving video stream...", progress: 10 });
+      let ytUrl = typeof input === "string" ? input : "";
       let streamUrl = "";
-      try {
-        streamUrl = await resolveYoutubeUrlClientSide(ytUrl);
-      } catch (err: any) {
-        // Fallback to server if client-side racing fails (unlikely, but safe)
-        const dlRes = await fetch("/api/youtube-download", { 
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: ytUrl, proxyStream: false }) 
-        });
-        const dlMeta = await dlRes.json();
-        if (!dlMeta.url) throw new Error(err.message || "Failed to resolve stream.");
-        streamUrl = dlMeta.url;
-      }
       
-      if (!streamUrl) throw new Error("No video URL returned.");
+      if (typeof input === "string") {
+        // --- 1. YouTube Flow ---
+        await updateProject(projectId, { status: "initializing", progressMessage: "Fetching YouTube Metadata...", progress: 5 });
+        const metaRes = await fetch(`/api/youtube-download?url=${encodeURIComponent(ytUrl)}`);
+        if (!metaRes.ok) throw new Error("Could not fetch YouTube metadata.");
+        const meta = await metaRes.json();
+        await updateProject(projectId, { title: meta.title || "YouTube Video", thumbnailUrl: meta.thumbnail });
 
-      // 3. Download to OPFS
-      await updateProject(projectId, { status: "extracting", progressMessage: "Downloading safely to local disk...", progress: 20 });
-      const file = await streamUrlToOPFS(streamUrl, `video-${projectId}.mp4`, (msg) => {
-         updateProject(projectId, { progressMessage: msg });
-      });
+        await updateProject(projectId, { progressMessage: "Resolving video stream...", progress: 10 });
+        try {
+          streamUrl = await resolveYoutubeUrlClientSide(ytUrl);
+        } catch (err: any) {
+          const dlRes = await fetch("/api/youtube-download", { 
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: ytUrl, proxyStream: false }) 
+          });
+          const dlMeta = await dlRes.json();
+          if (!dlMeta.url) throw new Error(err.message || "Failed to resolve stream.");
+          streamUrl = dlMeta.url;
+        }
+      }
 
-      // 4. Extract Audio
+      // --- 3. Handle data saving (from URL or File) ---
+      let file: File;
+      if (typeof input === "string") {
+        await updateProject(projectId, { status: "extracting", progressMessage: "Downloading safely to local disk...", progress: 20 });
+        file = await streamUrlToOPFS(streamUrl, `video-${projectId}.mp4`, (msg) => {
+           updateProject(projectId, { progressMessage: msg });
+        });
+      } else {
+        await updateProject(projectId, { status: "extracting", progressMessage: "Saving local file to workspace...", progress: 20 });
+        // Wrap local file in OPFS for consistency if needed, but for now we can use it directly if it's small, 
+        // or write it to OPFS for large file support (recommended).
+        file = input; 
+        await updateProject(projectId, { title: file.name, progress: 30 });
+      }
+
+      // --- 4. Extract Audio ---
       await updateProject(projectId, { progressMessage: "Parsing Audio...", progress: 40 });
       const info = await getVideoInfo(file);
       await updateProject(projectId, { duration: info.duration });
@@ -134,16 +143,19 @@ export default function ProjectsDashboard() {
     }
   };
 
-  const handleCreateProject = async (url: string) => {
-    if (!url) return;
-    const projectId = await createProject(url);
+  const handleCreateProject = async (input: string | File) => {
+    if (!input) return;
+    const source = typeof input === "string" ? input : "Local File";
+    const projectId = await createProject(source);
     const pInfo = await getProject(projectId);
     setProjects(prev => [pInfo!, ...prev]);
     setActiveProject(pInfo!);
     setActiveClips([]);
     // Run pipeline asynchronously
-    processProjectPipeline(projectId, url);
+    processProjectPipeline(projectId, input);
   };
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-refresh interval for projects to see updates while they are initializing
   useEffect(() => {
@@ -192,7 +204,17 @@ export default function ProjectsDashboard() {
   return (
     <div className={styles.container}>
       <Header />
-      <div style={{ position: 'fixed', bottom: '10px', right: '10px', fontSize: '10px', opacity: 0.3, zIndex: 1000 }}>v1.2 (Client Engine)</div>
+      <div style={{ position: 'fixed', bottom: '10px', right: '10px', fontSize: '10px', opacity: 0.3, zIndex: 1000 }}>v1.3 (Pro Engine + Local Upload)</div>
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        style={{ display: 'none' }} 
+        accept="video/*" 
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleCreateProject(file);
+        }}
+      />
       <main className={styles.main}>
         <div className={styles.sidebar}>
           <div className={styles.sidebarHeader}>
@@ -288,7 +310,17 @@ export default function ProjectsDashboard() {
                 >
                   Generate Clips
                 </button>
+                <button 
+                  className="btn btn-secondary"
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Upload a local video file if YouTube is blocked"
+                >
+                  📂 Upload File
+                </button>
               </div>
+              <p style={{ marginTop: '1rem', fontSize: '0.8rem', opacity: 0.6 }}>
+                💡 Tip: If a video is age-restricted, download it manually and upload it here.
+              </p>
             </div>
           ) : (
             <div className={styles.projectWorkspace}>
