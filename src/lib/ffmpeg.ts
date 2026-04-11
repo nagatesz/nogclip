@@ -20,29 +20,6 @@ export interface ExportOptions {
 
 export type ProgressCallback = (progress: number, message: string) => void;
 
-// Memory management
-export function cleanupMemory() {
-  // Force garbage collection if available (Chrome with --js-flags flag)
-  if (typeof (window as any).gc === 'function') {
-    (window as any).gc();
-  }
-  
-  // Clear large objects from memory
-  if (ffmpegInstance) {
-    // Terminate any running processes
-    try {
-      ffmpegInstance.terminate();
-    } catch (e) {
-      // Ignore termination errors
-    }
-  }
-  
-  // Revoke any object URLs
-  const oldUrls: string[] = (window as any).__revokedUrls || [];
-  oldUrls.forEach(url => URL.revokeObjectURL(url));
-  (window as any).__revokedUrls = [];
-}
-
 export async function loadFFmpeg(
   onProgress?: ProgressCallback
 ): Promise<FFmpeg> {
@@ -111,15 +88,6 @@ export async function extractAudio(
 
   const outputName = "audio.wav";
   
-  // Cleanup previous mounts
-  try { await ffmpeg.unmount("/worker"); } catch {}
-  try { await ffmpeg.deleteFile(outputName); } catch {}
-  
-  // Force garbage collection hint
-  if (typeof (window as any).gc === 'function') {
-    (window as any).gc();
-  }
-  
   await ffmpeg.mount("WORKERFS" as any, { blobs: [{ name: "input.mp4", data: videoFile }] }, "/worker");
 
   try {
@@ -160,16 +128,12 @@ export async function extractAudioChunk(
 
   const outputName = `chunk_${startSec}.wav`;
 
-  // Cleanup previous mounts
-  try { await ffmpeg.unmount("/worker"); } catch {}
-  try { await ffmpeg.deleteFile(outputName); } catch {}
-  
-  // Force garbage collection hint
-  if (typeof (window as any).gc === 'function') {
-    (window as any).gc();
+  try {
+    await ffmpeg.mount("WORKERFS" as any, { blobs: [{ name: "input.mp4", data: videoFile }] }, "/worker");
+  } catch (e: any) {
+    console.error("FFmpeg mount error:", e);
+    throw new Error(`Failed to mount video file: ${e?.message || "Unknown error"}`);
   }
-  
-  await ffmpeg.mount("WORKERFS" as any, { blobs: [{ name: "input.mp4", data: videoFile }] }, "/worker");
 
   try {
     await ffmpeg.exec([
@@ -189,16 +153,25 @@ export async function extractAudioChunk(
       outputName,
     ]);
   } catch (e: any) {
-    if (!e?.message?.includes("Aborted") && e !== "Aborted") throw e;
+    console.error("FFmpeg exec error:", e);
+    if (!e?.message?.includes("Aborted") && e !== "Aborted") {
+      throw new Error(`FFmpeg processing failed: ${e?.message || "Unknown error"}`);
+    }
   } finally {
-    try { await ffmpeg.unmount("/worker"); } catch {}
+    try { await ffmpeg.unmount("/worker"); } catch (e) {
+      console.error("FFmpeg unmount error:", e);
+    }
   }
 
-  const data = (await ffmpeg.readFile(outputName)) as Uint8Array;
-  await ffmpeg.deleteFile(outputName);
-
-  // @ts-expect-error FFmpeg FileData Uint8Array is runtime-compatible with BlobPart
-  return new Blob([data], { type: "audio/wav" });
+  try {
+    const data = (await ffmpeg.readFile(outputName)) as Uint8Array;
+    await ffmpeg.deleteFile(outputName);
+    // @ts-expect-error FFmpeg FileData Uint8Array is runtime-compatible with BlobPart
+    return new Blob([data], { type: "audio/wav" });
+  } catch (e: any) {
+    console.error("FFmpeg read file error:", e);
+    throw new Error(`Failed to read output file: ${e?.message || "Unknown error"}`);
+  }
 }
 
 export async function trimVideo(
