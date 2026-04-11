@@ -131,14 +131,22 @@ function StudioInner() {
     if (!v) return;
     const onTimeUpdate = () => {
       setCurrentTime(v.currentTime);
+      const canvas = captionCanvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d")!;
+      
       if (captionsEnabled && transcription && captionStyle.id !== "none") {
-        const canvas = captionCanvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext("2d");
-        if (ctx) renderLiveCaptions(ctx, transcription.words, v.currentTime, captionStyle, canvas.width, canvas.height);
+        // Check if there's an active word at current time
+        const activeWord = transcription.words.find(w => v.currentTime >= w.start && v.currentTime <= w.end);
+        if (activeWord) {
+          renderLiveCaptions(ctx, transcription.words, v.currentTime, captionStyle, canvas.width, canvas.height);
+        } else {
+          // Clear canvas when no active word
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
       } else {
-        const canvas = captionCanvasRef.current;
-        if (canvas) { const ctx = canvas.getContext("2d"); ctx?.clearRect(0, 0, canvas.width, canvas.height); }
+        // Clear canvas when captions disabled
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
     };
     const onEnded = () => setIsPlaying(false);
