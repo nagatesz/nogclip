@@ -238,13 +238,50 @@ function StudioInner() {
 
       const onFFmpegProgress: ProgressCallback = (_p, msg) => setStageMessage(msg);
       
-      // Skip audio extraction for very long videos to prevent browser crashes
+      // Use backend API for videos over 15 minutes to prevent browser crashes
       const MAX_AUDIO_DURATION = 15 * 60; // 15 minutes
       if (info.duration > MAX_AUDIO_DURATION) {
-        setStage("ready");
-        setStageMessage("");
-        showToast(`Video too long for automatic processing (${Math.round(info.duration / 60)} min). Manual editing available.`, "success");
-        return; // Skip transcription/AI for long videos
+        setStage("extracting-audio");
+        setStageMessage("Processing on server (long video)...");
+        try {
+          const formData = new FormData();
+          formData.append("video", file);
+          formData.append("duration", info.duration.toString());
+          
+          const res = await fetch("/api/process-video", {
+            method: "POST",
+            body: formData,
+          });
+          
+          if (!res.ok) throw new Error("Server processing failed");
+          
+          const data = await res.json();
+          setTranscription(data.transcription);
+          
+          setStage("analyzing");
+          setStageMessage("Processing AI clips...");
+          
+          setClips(data.clips);
+          setSummary(data.summary);
+          const splitPoints = data.clips.flatMap((c: ClipSuggestion) => [c.start, c.end]) as number[];
+          setSplits([...new Set(splitPoints)].sort((a, b) => a - b));
+          if (data.clips.length > 0) {
+            const top = data.clips[0];
+            setSelectedClip(top); setTrimStart(top.start); setTrimEnd(top.end);
+            setVideo(v => ({ ...v, title: top.title }));
+          }
+          
+          setStage("ready"); setStageMessage("");
+          showToast("Video processed on server! ✅");
+          setSidebarTab("ai");
+          return;
+        } catch (e) {
+          console.error("Backend processing failed, falling back to browser:", e);
+          showToast("Server processing failed, using browser fallback (manual editing only)", "error");
+          setStage("ready");
+          setStageMessage("");
+          return; // Fallback to manual editing only
+        }
       }
       
       setStage("extracting-audio");
