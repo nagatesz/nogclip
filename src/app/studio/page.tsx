@@ -230,27 +230,25 @@ function StudioInner() {
 
       const onFFmpegProgress: ProgressCallback = (_p, msg) => setStageMessage(msg);
       
+      // Skip audio extraction for very long videos to prevent browser crashes
+      const MAX_AUDIO_DURATION = 15 * 60; // 15 minutes
+      if (info.duration > MAX_AUDIO_DURATION) {
+        setStage("ready");
+        setStageMessage("");
+        showToast(`Video too long for automatic processing (${Math.round(info.duration / 60)} min). Manual editing available.`, "success");
+        return; // Skip transcription/AI for long videos
+      }
+      
       setStage("extracting-audio");
       setStageMessage("Extracting audio track...");
       
-      let extractionDuration = info.duration;
-      let audioBlob: Blob;
-      // Use Web Audio API for long videos to avoid FFmpeg mounting full file in memory
-      const MAX_AUDIO_DURATION = 15 * 60; // 15 minutes
-      if (extractionDuration > MAX_AUDIO_DURATION) {
-        setStageMessage(`Extracting audio (First 15 minutes to prevent browser crashes)...`);
-        extractionDuration = MAX_AUDIO_DURATION;
-        showToast("Long video detected. Using optimized extraction.", "success");
-        audioBlob = await extractAudioWithWebAudio(file, onFFmpegProgress);
-      } else {
-        await loadFFmpeg(onFFmpegProgress);
-        audioBlob = await extractAudio(file, onFFmpegProgress);
-      }
+      await loadFFmpeg(onFFmpegProgress);
+      const audioBlob = await extractAudio(file, onFFmpegProgress);
 
       try { const wf = await generateWaveform(audioBlob, 400); setWaveformData(wf); } catch {}
 
       setStage("transcribing");
-      setStageMessage(extractionDuration > 600 ? "Transcribing with Whisper AI (long video — this may take a few minutes)..." : "Transcribing with Whisper AI...");
+      setStageMessage("Transcribing with Whisper AI...");
 
       let transcriptResult: TranscriptionResult;
       try {
