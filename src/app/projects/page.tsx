@@ -164,9 +164,29 @@ export default function ProjectsDashboard() {
         ref={fileInputRef} 
         style={{ display: 'none' }} 
         accept="video/*" 
-        onChange={(e) => {
+        onChange={async (e) => {
           const file = e.target.files?.[0];
-          if (file) handleCreateProject(file);
+          if (!file) return;
+
+          // Check video duration
+          const video = document.createElement('video');
+          video.preload = 'metadata';
+          video.src = URL.createObjectURL(file);
+          
+          await new Promise<void>((resolve) => {
+            video.onloadedmetadata = () => resolve();
+            video.onerror = () => resolve();
+          });
+          
+          const duration = video.duration;
+          URL.revokeObjectURL(video.src);
+          
+          if (duration > 1800) { // 30 minutes
+            const warning = confirm(`This video is ${Math.round(duration / 60)} minutes long. Processing will take approximately ${Math.round(duration / 60)} minutes or more. For faster processing, consider trimming the video to under 30 minutes. Continue anyway?`);
+            if (!warning) return;
+          }
+
+          handleCreateProject(file);
         }}
       />
       <main className={styles.main}>

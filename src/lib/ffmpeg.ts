@@ -32,9 +32,11 @@ export async function loadFFmpeg(
 
     ffmpeg.on("progress", ({ progress, time }) => {
       const pct = Math.round(progress * 100);
+      const timeMs = time || 0;
+      const timeSec = timeMs / 1000000;
       onProgress?.(
         pct,
-        `Processing... ${pct}% (${Math.round((time || 0) / 1000000)}s)`
+        `Processing... ${pct}% (${Math.round(timeSec)}s processed)`
       );
     });
 
