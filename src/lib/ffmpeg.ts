@@ -20,151 +20,6 @@ export interface ExportOptions {
 
 export type ProgressCallback = (progress: number, message: string) => void;
 
-// Web Audio API fallback for audio extraction when FFmpeg fails
-export async function extractAudioWithWebAudio(
-  videoFile: File,
-  onProgress?: ProgressCallback
-): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
-    video.src = URL.createObjectURL(videoFile);
-    video.muted = false;
-    video.crossOrigin = 'anonymous';
-    video.preload = 'auto';
-    
-    let mediaRecorder: MediaRecorder | null = null;
-    
-    onProgress?.(5, "Loading video...");
-    
-    video.onloadedmetadata = () => {
-      onProgress?.(10, "Extracting audio...");
-      
-      try {
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({
-          sampleRate: 16000
-        });
-        
-        const source = audioContext.createMediaElementSource(video);
-        const destination = audioContext.createMediaStreamDestination();
-        source.connect(destination);
-        
-        const stream = destination.stream;
-        mediaRecorder = new MediaRecorder(stream, {
-          mimeType: 'audio/webm;codecs=opus',
-          audioBitsPerSecond: 128000
-        });
-        
-        const chunks: BlobPart[] = [];
-        
-        mediaRecorder.ondataavailable = (e) => {
-          if (e.data.size > 0) {
-            chunks.push(e.data);
-          }
-        };
-        
-        mediaRecorder.onstop = async () => {
-          onProgress?.(90, "Processing audio...");
-          try {
-            const webmBlob = new Blob(chunks, { type: 'audio/webm' });
-            const arrayBuffer = await webmBlob.arrayBuffer();
-            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-            const wavBlob = audioBufferToWav(audioBuffer);
-            URL.revokeObjectURL(video.src);
-            onProgress?.(100, "Audio extracted");
-            resolve(wavBlob);
-          } catch (e) {
-            reject(new Error(`Failed to convert audio: ${e instanceof Error ? e.message : 'Unknown error'}`));
-          }
-        };
-        
-        // Start recording and play video
-        video.currentTime = 0;
-        mediaRecorder.start();
-        video.play().catch((err) => {
-          console.error("Video play error:", err);
-          mediaRecorder?.stop();
-        });
-        
-        // Stop after 15 minutes
-        setTimeout(() => {
-          if (mediaRecorder && mediaRecorder.state === 'recording') {
-            video.pause();
-            mediaRecorder.stop();
-          }
-        }, 15 * 60 * 1000);
-        
-      } catch (e) {
-        reject(new Error(`Web Audio API error: ${e instanceof Error ? e.message : 'Unknown error'}`));
-      }
-    };
-    
-    video.onerror = () => {
-      reject(new Error("Failed to load video file"));
-    };
-    
-    video.onended = () => {
-      if (mediaRecorder && mediaRecorder.state === 'recording') {
-        mediaRecorder.stop();
-      }
-    };
-  });
-}
-
-function audioBufferToWav(buffer: AudioBuffer): Blob {
-  const numChannels = buffer.numberOfChannels;
-  const sampleRate = buffer.sampleRate;
-  const format = 1; // PCM
-  const bitDepth = 16;
-  
-  const bytesPerSample = bitDepth / 8;
-  const blockAlign = numChannels * bytesPerSample;
-  
-  const dataLength = buffer.length * blockAlign;
-  const bufferLength = 44 + dataLength;
-  
-  const arrayBuffer = new ArrayBuffer(bufferLength);
-  const view = new DataView(arrayBuffer);
-  
-  // WAV header
-  writeString(view, 0, 'RIFF');
-  view.setUint32(4, 36 + dataLength, true);
-  writeString(view, 8, 'WAVE');
-  writeString(view, 12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, format, true);
-  view.setUint16(22, numChannels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * blockAlign, true);
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, bitDepth, true);
-  writeString(view, 36, 'data');
-  view.setUint32(40, dataLength, true);
-  
-  // Write audio data
-  const channels: Float32Array[] = [];
-  for (let i = 0; i < numChannels; i++) {
-    channels.push(buffer.getChannelData(i));
-  }
-  
-  let offset = 44;
-  for (let i = 0; i < buffer.length; i++) {
-    for (let channel = 0; channel < numChannels; channel++) {
-      const sample = Math.max(-1, Math.min(1, channels[channel][i]));
-      const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
-      view.setInt16(offset, intSample, true);
-      offset += 2;
-    }
-  }
-  
-  return new Blob([arrayBuffer], { type: 'audio/wav' });
-}
-
-function writeString(view: DataView, offset: number, string: string) {
-  for (let i = 0; i < string.length; i++) {
-    view.setUint8(offset + i, string.charCodeAt(i));
-  }
-}
-
 export async function loadFFmpeg(
   onProgress?: ProgressCallback
 ): Promise<FFmpeg> {
@@ -233,6 +88,9 @@ export async function extractAudio(
 
   const outputName = "audio.wav";
   
+  try { await ffmpeg.createDir("/worker"); } catch {}
+  try { await ffmpeg.unmount("/worker"); } catch {}
+  
   await ffmpeg.mount("WORKERFS" as any, { blobs: [{ name: "input.mp4", data: videoFile }] }, "/worker");
 
   try {
@@ -273,12 +131,10 @@ export async function extractAudioChunk(
 
   const outputName = `chunk_${startSec}.wav`;
 
-  try {
-    await ffmpeg.mount("WORKERFS" as any, { blobs: [{ name: "input.mp4", data: videoFile }] }, "/worker");
-  } catch (e: any) {
-    console.error("FFmpeg mount error:", e);
-    throw new Error(`Failed to mount video file: ${e?.message || "Unknown error"}`);
-  }
+  try { await ffmpeg.createDir("/worker"); } catch {}
+  try { await ffmpeg.unmount("/worker"); } catch {}
+  
+  await ffmpeg.mount("WORKERFS" as any, { blobs: [{ name: "input.mp4", data: videoFile }] }, "/worker");
 
   try {
     await ffmpeg.exec([
@@ -298,25 +154,16 @@ export async function extractAudioChunk(
       outputName,
     ]);
   } catch (e: any) {
-    console.error("FFmpeg exec error:", e);
-    if (!e?.message?.includes("Aborted") && e !== "Aborted") {
-      throw new Error(`FFmpeg processing failed: ${e?.message || "Unknown error"}`);
-    }
+    if (!e?.message?.includes("Aborted") && e !== "Aborted") throw e;
   } finally {
-    try { await ffmpeg.unmount("/worker"); } catch (e) {
-      console.error("FFmpeg unmount error:", e);
-    }
+    try { await ffmpeg.unmount("/worker"); } catch {}
   }
 
-  try {
-    const data = (await ffmpeg.readFile(outputName)) as Uint8Array;
-    await ffmpeg.deleteFile(outputName);
-    // @ts-expect-error FFmpeg FileData Uint8Array is runtime-compatible with BlobPart
-    return new Blob([data], { type: "audio/wav" });
-  } catch (e: any) {
-    console.error("FFmpeg read file error:", e);
-    throw new Error(`Failed to read output file: ${e?.message || "Unknown error"}`);
-  }
+  const data = (await ffmpeg.readFile(outputName)) as Uint8Array;
+  await ffmpeg.deleteFile(outputName);
+
+  // @ts-expect-error FFmpeg FileData Uint8Array is runtime-compatible with BlobPart
+  return new Blob([data], { type: "audio/wav" });
 }
 
 export async function trimVideo(

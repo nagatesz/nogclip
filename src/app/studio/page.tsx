@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { getClip, getProject } from "@/lib/db";
 import {
-  loadFFmpeg, extractAudio, extractAudioChunk, extractAudioWithWebAudio, exportClip, trimVideo,
+  loadFFmpeg, extractAudio, extractAudioChunk, exportClip, trimVideo,
   getVideoInfo, generateThumbnail, type ExportOptions, type ProgressCallback,
 } from "@/lib/ffmpeg";
 import { transcribeAudio, type TranscriptionResult } from "@/lib/transcription";
@@ -224,45 +224,22 @@ function StudioInner() {
       for (let t = 0; t < info.duration; t += thumbInterval) thumbPromises.push(generateThumbnail(url, t));
       Promise.all(thumbPromises).then(thumbs => setThumbnails(thumbs.filter(t => t !== "")));
 
-      const MAX_SAFE_DURATION = 15 * 60; // 15 minutes max for safety
       const onFFmpegProgress: ProgressCallback = (_p, msg) => setStageMessage(msg);
-      
-      // Only load FFmpeg if we're going to use it (short videos)
-      if (info.duration <= MAX_SAFE_DURATION) {
-        await loadFFmpeg(onFFmpegProgress);
-      }
+      await loadFFmpeg(onFFmpegProgress);
 
       setStage("extracting-audio");
       setStageMessage("Extracting audio track...");
       
       let extractionDuration = info.duration;
       let audioBlob: Blob;
-      
-      // Use Web Audio API directly for long videos to bypass FFmpeg FS errors
-      if (extractionDuration > MAX_SAFE_DURATION) {
-        setStageMessage(`Extracting audio (First 15 minutes to prevent memory issues)...`);
-        extractionDuration = MAX_SAFE_DURATION;
-        showToast("Long video detected. Using alternative extraction method.", "success");
-        try {
-          audioBlob = await extractAudioWithWebAudio(file, onFFmpegProgress);
-        } catch (e: any) {
-          throw new Error(`Web Audio extraction failed: ${e?.message || 'Unknown error'}`);
-        }
+      // Limit extraction to prevent memory crashes
+      if (extractionDuration > MAX_BROWSER_DURATION) {
+        setStageMessage(`Extracting audio (First 30 minutes due to browser memory limits)...`);
+        extractionDuration = MAX_BROWSER_DURATION;
+        showToast("Long video detected. Analyzing the first 30 minutes.", "success");
+        audioBlob = await extractAudioChunk(file, 0, extractionDuration, onFFmpegProgress);
       } else {
-        // For short videos, try FFmpeg first, fallback to Web Audio API
-        try {
-          audioBlob = await extractAudio(file, onFFmpegProgress);
-        } catch (ffmpegError: any) {
-          console.warn("FFmpeg extraction failed, trying Web Audio API fallback:", ffmpegError);
-          setStageMessage("FFmpeg failed, trying alternative extraction...");
-          try {
-            audioBlob = await extractAudioWithWebAudio(file, onFFmpegProgress);
-            showToast("Used alternative audio extraction method", "success");
-          } catch (webAudioError: any) {
-            console.error("Web Audio API also failed:", webAudioError);
-            throw new Error(`Audio extraction failed: FFmpeg error (${ffmpegError?.message || 'Unknown'}), Web Audio error (${webAudioError?.message || 'Unknown'})`);
-          }
-        }
+        audioBlob = await extractAudio(file, onFFmpegProgress);
       }
 
       try { const wf = await generateWaveform(audioBlob, 400); setWaveformData(wf); } catch {}
