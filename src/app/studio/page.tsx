@@ -32,7 +32,7 @@ const MAX_BROWSER_DURATION = 4 * 60 * 60;
 // Hard limit to prevent browser crashes on very long videos
 const MAX_SAFE_VIDEO_DURATION = 60 * 60; // 1 hour max for stability 
 
-type SidebarTab = "ai" | "captions" | "media" | "brand" | "broll" | "transitions" | "text" | "music" | null;
+type SidebarTab = "ai" | "captions" | "media" | "brand" | "broll" | "transitions" | "text" | "music" | "chunk" | null;
 
 const HIGHLIGHT_KEYWORDS = new Set(["amazing","incredible","insane","crazy","billion","million","money","dollars","viral","trending","breaking","important","never","always","best","worst","extraordinary","unbelievable"]);
 const STRONG_WORDS = new Set(["fuck","fucking","shit","damn","hell","ass","bitch"]);
@@ -85,6 +85,9 @@ function StudioInner() {
   const [newWordStart, setNewWordStart] = useState(0);
   const [newWordEnd, setNewWordEnd] = useState(0);
   const [draggedWordIdx, setDraggedWordIdx] = useState<number | null>(null);
+  const [chunkedParts, setChunkedParts] = useState<{ id: string; name: string; start: number; end: number; duration: number; transcription?: TranscriptionResult; status: "pending"|"processing"|"completed"|"failed" }[]>([]);
+  const [videoId, setVideoId] = useState<string>("");
+  const [isChunking, setIsChunking] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -493,6 +496,134 @@ function StudioInner() {
     setSummary(""); setWaveformData([]); setThumbnails([]); setSplits([]);
     setCurrentTime(0); setTrimStart(0); setTrimEnd(0); setIsPlaying(false);
     setError(""); setYtUrl(""); setSidebarTab("ai");
+    setChunkedParts([]); setVideoId("");
+  };
+
+  const handleChunkVideo = async (file: File) => {
+    setIsChunking(true);
+    setError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("chunkDuration", (20 * 60).toString());
+
+      const response = await fetch("/api/chunk-video", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || "Chunking failed");
+      }
+
+      const result = await response.json();
+      setVideoId(result.videoId);
+      setChunkedParts(result.chunks.map((chunk: any) => ({
+        ...chunk,
+        status: "pending" as const,
+      })));
+      showToast(`Video split into ${result.chunks.length} parts`, "success");
+    } catch (e: any) {
+      console.error("Chunking error:", e);
+      setError(e.message || "Chunking failed");
+      showToast("Chunking failed", "error");
+    } finally {
+      setIsChunking(false);
+    }
+  };
+
+  const processChunkSequentially = async (file: File) => {
+    if (chunkedParts.length === 0) return;
+
+    const allSegments: any[] = [];
+    const allWords: any[] = [];
+    let fullText = "";
+
+    for (let i = 0; i < chunkedParts.length; i++) {
+      const part = chunkedParts[i];
+      setChunkedParts(prev => prev.map((p, idx) => idx === i ? { ...p, status: "processing" } : p));
+      setStageMessage(`Processing ${part.name} (${i + 1}/${chunkedParts.length})...`);
+
+      try {
+        // Extract audio for this chunk using Web Audio API
+        const onFFmpegProgress: ProgressCallback = (_p, msg) => setStageMessage(msg);
+        const chunkAudioBlob = await extractAudioWithWebAudio(file, onFFmpegProgress, part.start, part.duration);
+
+        // Transcribe this chunk
+        const chunkTranscription = await transcribeAudio(chunkAudioBlob);
+
+        // Offset timestamps
+        const offsetSegments = chunkTranscription.segments.map((seg: any) => ({
+          ...seg,
+          start: seg.start + part.start,
+          end: seg.end + part.start,
+          words: seg.words.map((w: any) => ({
+            ...w,
+            start: w.start + part.start,
+            end: w.end + part.start,
+          })),
+        }));
+
+        const offsetWords = chunkTranscription.words.map((w: any) => ({
+          ...w,
+          start: w.start + part.start,
+          end: w.end + part.start,
+        }));
+
+        allSegments.push(...offsetSegments);
+        allWords.push(...offsetWords);
+        fullText += (fullText ? " " : "") + chunkTranscription.text;
+
+        setChunkedParts(prev => prev.map((p, idx) => idx === i ? { ...p, status: "completed", transcription: chunkTranscription } : p));
+
+        // Delay between chunks to avoid rate limiting
+        if (i < chunkedParts.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+      } catch (e) {
+        console.error(`Part ${part.name} failed:`, e);
+        setChunkedParts(prev => prev.map((p, idx) => idx === i ? { ...p, status: "failed" } : p));
+        showToast(`${part.name} failed, skipping...`, "error");
+      }
+    }
+
+    // Combine all transcriptions
+    const fullTranscription = {
+      text: fullText,
+      segments: allSegments,
+      words: allWords,
+      language: "en",
+      duration: chunkedParts.reduce((sum, p) => sum + p.duration, 0),
+    };
+
+    setTranscription(fullTranscription);
+
+    // Run AI analysis on combined transcription
+    setStage("analyzing");
+    setStageMessage("AI analyzing for viral clips...");
+    try {
+      const analysis = await analyzeTranscript(fullTranscription.segments, fullTranscription.words, fullTranscription.duration);
+      setClips(analysis.clips);
+      setSummary(analysis.summary);
+      const splitPoints = analysis.clips.flatMap(c => [c.start, c.end]);
+      setSplits([...new Set(splitPoints)].sort((a, b) => a - b));
+      if (analysis.clips.length > 0) {
+        const top = analysis.clips[0];
+        setSelectedClip(top);
+        setTrimStart(top.start);
+        setTrimEnd(top.end);
+        setVideo(v => ({ ...v, title: top.title }));
+      }
+      showToast("All parts processed! ✅");
+    } catch (e) {
+      console.error("Analysis error:", e);
+      showToast("AI analysis failed — you can still edit manually.", "error");
+    }
+
+    setStage("ready");
+    setStageMessage("");
+    setSidebarTab("ai");
   };
 
   const isKeyword = (word: string): "bold"|"highlight"|null => {
@@ -1026,17 +1157,94 @@ function StudioInner() {
                   <p style={{ fontSize: 28, marginBottom: 8 }}>T</p><p>Text overlays coming soon.</p>
                 </div></>
               )}
+              {/* Music */}
               {sidebarTab === "music" && (
                 <><div className="sidebar-panel-title">Background Music</div>
                 <div style={{ color: "#334155", fontSize: 13, textAlign: "center", padding: "30px 20px" }}>
                   <p style={{ fontSize: 28, marginBottom: 8 }}>🎵</p><p>Music library coming soon.</p>
                 </div></>
               )}
+              {/* Chunk */}
+              {sidebarTab === "chunk" && (
+                <>
+                  <div className="sidebar-panel-title">Video Parts {chunkedParts.length > 0 && `(${chunkedParts.length})`}</div>
+                  {chunkedParts.length === 0 ? (
+                    <div style={{ color: "#334155", fontSize: 13, textAlign: "center", padding: "30px 20px" }}>
+                      <p style={{ fontSize: 28, marginBottom: 8 }}>📦</p>
+                      <p>Upload a video to chunk it into 20-minute parts.</p>
+                      <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        style={{ 
+                          marginTop: 12, 
+                          background: "#8b5cf6", 
+                          color: "white", 
+                          border: "none", 
+                          padding: "8px 16px", 
+                          borderRadius: 6, 
+                          cursor: "pointer",
+                          fontSize: 12
+                        }}
+                      >
+                        Upload Video
+                      </button>
+                      <input ref={fileInputRef} className="upload-input" type="file" accept="video/*" style={{ display: "none" }} onChange={e => {
+                        if (e.target.files && e.target.files[0]) {
+                          handleChunkVideo(e.target.files[0]);
+                        }
+                      }} />
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ padding: 12 }}>
+                        <button
+                          onClick={() => processChunkSequentially(video.file!)}
+                          disabled={isChunking || chunkedParts.every(p => p.status === "completed" || p.status === "failed")}
+                          style={{
+                            width: "100%",
+                            background: isChunking ? "#4b5563" : "#8b5cf6",
+                            color: "white",
+                            border: "none",
+                            padding: "10px 16px",
+                            borderRadius: 6,
+                            cursor: isChunking ? "not-allowed" : "pointer",
+                            fontSize: 13,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {isChunking ? "Processing..." : "Process All Parts Sequentially"}
+                        </button>
+                      </div>
+                      <div className="clips-list">
+                        {chunkedParts.map((part, idx) => (
+                          <div key={part.id} className={`clip-card ${part.status === "processing" ? "processing" : ""}`}>
+                            <div className="clip-card-header">
+                              <span className="clip-card-title">{part.name}</span>
+                              <span className={`clip-card-score ${part.status}`}>
+                                {part.status === "pending" && "⏳ Pending"}
+                                {part.status === "processing" && "⏳ Processing"}
+                                {part.status === "completed" && "✓ Done"}
+                                {part.status === "failed" && "✗ Failed"}
+                              </span>
+                            </div>
+                            <div className="clip-card-time">{formatTime(part.start)} → {formatTime(part.end)} · {formatTime(part.duration)}</div>
+                            {part.transcription && (
+                              <div style={{ marginTop: 8, fontSize: 11, color: "#4b5563" }}>
+                                {part.transcription.words.length} words transcribed
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
             </div>
           )}
 
           <div className="sidebar-icons">
             {([
+              { id: "chunk" as SidebarTab, icon: "📦", label: "Chunk" },
               { id: "ai" as SidebarTab, icon: "✨", label: "AI" },
               { id: "captions" as SidebarTab, icon: "💬", label: "Captions" },
               { id: "media" as SidebarTab, icon: "📐", label: "Media" },
