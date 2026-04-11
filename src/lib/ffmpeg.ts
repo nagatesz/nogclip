@@ -8,7 +8,9 @@ let loadPromise: Promise<FFmpeg> | null = null;
 // Web Audio API extraction for long videos to avoid FFmpeg memory issues
 export async function extractAudioWithWebAudio(
   videoFile: File,
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  startTime: number = 0,
+  duration: number = 15 * 60
 ): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const video = document.createElement("video");
@@ -39,16 +41,16 @@ export async function extractAudioWithWebAudio(
 
     video.onloadedmetadata = () => {
       onProgress?.(0, "Starting audio extraction...");
-      const duration = Math.min(video.duration, 15 * 60); // Limit to 15 minutes for stability
-      video.currentTime = 0;
+      const endTime = startTime + duration;
+      video.currentTime = startTime;
       mediaRecorder.start();
       video.play();
 
       const updateProgress = () => {
-        const progress = (video.currentTime / duration) * 100;
-        onProgress?.(progress, `Extracting audio... ${Math.round(video.currentTime)}s / ${Math.round(duration)}s`);
+        const progress = ((video.currentTime - startTime) / duration) * 100;
+        onProgress?.(progress, `Extracting audio... ${Math.round(video.currentTime - startTime)}s / ${Math.round(duration)}s`);
         
-        if (video.currentTime >= duration || video.ended) {
+        if (video.currentTime >= endTime || video.ended) {
           mediaRecorder.stop();
           video.pause();
         } else {

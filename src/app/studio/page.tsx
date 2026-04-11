@@ -238,50 +238,94 @@ function StudioInner() {
 
       const onFFmpegProgress: ProgressCallback = (_p, msg) => setStageMessage(msg);
       
-      // Use backend API for videos over 15 minutes to prevent browser crashes
-      const MAX_AUDIO_DURATION = 15 * 60; // 15 minutes
-      if (info.duration > MAX_AUDIO_DURATION) {
+      // Segmented processing for long videos (5-minute chunks)
+      const CHUNK_DURATION = 5 * 60; // 5 minutes per chunk
+      if (info.duration > CHUNK_DURATION) {
         setStage("extracting-audio");
-        setStageMessage("Processing on server (long video)...");
+        setStageMessage(`Processing ${Math.ceil(info.duration / CHUNK_DURATION)} chunks...`);
+        
+        const allSegments: any[] = [];
+        const allWords: any[] = [];
+        let fullText = "";
+        const numChunks = Math.ceil(info.duration / CHUNK_DURATION);
+        
+        for (let i = 0; i < numChunks; i++) {
+          const startTime = i * CHUNK_DURATION;
+          const chunkDuration = Math.min(CHUNK_DURATION, info.duration - startTime);
+          setStageMessage(`Processing chunk ${i + 1}/${numChunks} (${formatTime(startTime)} - ${formatTime(startTime + chunkDuration)})...`);
+          
+          try {
+            const chunkAudioBlob = await extractAudioWithWebAudio(file, onFFmpegProgress, startTime, chunkDuration);
+            
+            setStage("transcribing");
+            setStageMessage(`Transcribing chunk ${i + 1}/${numChunks}...`);
+            
+            const chunkTranscription = await transcribeAudio(chunkAudioBlob);
+            
+            // Offset timestamps
+            const offsetSegments = chunkTranscription.segments.map((seg: any) => ({
+              ...seg,
+              start: seg.start + startTime,
+              end: seg.end + startTime,
+              words: seg.words.map((w: any) => ({
+                ...w,
+                start: w.start + startTime,
+                end: w.end + startTime,
+              })),
+            }));
+            
+            const offsetWords = chunkTranscription.words.map((w: any) => ({
+              ...w,
+              start: w.start + startTime,
+              end: w.end + startTime,
+            }));
+            
+            allSegments.push(...offsetSegments);
+            allWords.push(...offsetWords);
+            fullText += (fullText ? " " : "") + chunkTranscription.text;
+            
+            // Small delay to avoid rate limiting
+            if (i < numChunks - 1) {
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          } catch (e) {
+            console.error(`Chunk ${i + 1} failed:`, e);
+            showToast(`Chunk ${i + 1} failed, skipping...`, "error");
+          }
+        }
+        
+        const fullTranscription = {
+          text: fullText,
+          segments: allSegments,
+          words: allWords,
+          language: "en",
+          duration: info.duration,
+        };
+        
+        setTranscription(fullTranscription);
+        
+        setStage("analyzing");
+        setStageMessage("AI analyzing for viral clips...");
+        
         try {
-          const formData = new FormData();
-          formData.append("video", file);
-          formData.append("duration", info.duration.toString());
-          
-          const res = await fetch("/api/process-video", {
-            method: "POST",
-            body: formData,
-          });
-          
-          if (!res.ok) throw new Error("Server processing failed");
-          
-          const data = await res.json();
-          setTranscription(data.transcription);
-          
-          setStage("analyzing");
-          setStageMessage("Processing AI clips...");
-          
-          setClips(data.clips);
-          setSummary(data.summary);
-          const splitPoints = data.clips.flatMap((c: ClipSuggestion) => [c.start, c.end]) as number[];
+          const analysis = await analyzeTranscript(fullTranscription.segments, fullTranscription.words, info.duration);
+          setClips(analysis.clips); setSummary(analysis.summary);
+          const splitPoints = analysis.clips.flatMap(c => [c.start, c.end]);
           setSplits([...new Set(splitPoints)].sort((a, b) => a - b));
-          if (data.clips.length > 0) {
-            const top = data.clips[0];
+          if (analysis.clips.length > 0) {
+            const top = analysis.clips[0];
             setSelectedClip(top); setTrimStart(top.start); setTrimEnd(top.end);
             setVideo(v => ({ ...v, title: top.title }));
           }
-          
-          setStage("ready"); setStageMessage("");
-          showToast("Video processed on server! ✅");
-          setSidebarTab("ai");
-          return;
         } catch (e) {
-          console.error("Backend processing failed, falling back to browser:", e);
-          showToast("Server processing failed, using browser fallback (manual editing only)", "error");
-          setStage("ready");
-          setStageMessage("");
-          return; // Fallback to manual editing only
+          console.error("Analysis error:", e);
+          showToast("AI analysis failed — you can still edit manually.", "error");
         }
+        
+        setStage("ready"); setStageMessage("");
+        showToast("Video processed! ✅");
+        setSidebarTab("ai");
+        return;
       }
       
       setStage("extracting-audio");
