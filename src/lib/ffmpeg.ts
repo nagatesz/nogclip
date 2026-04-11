@@ -20,6 +20,148 @@ export interface ExportOptions {
 
 export type ProgressCallback = (progress: number, message: string) => void;
 
+// Web Audio API fallback for audio extraction when FFmpeg fails
+export async function extractAudioWithWebAudio(
+  videoFile: File,
+  onProgress?: ProgressCallback
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video');
+    video.src = URL.createObjectURL(videoFile);
+    video.muted = false;
+    video.crossOrigin = 'anonymous';
+    
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({
+      sampleRate: 16000
+    });
+    
+    let source: MediaElementAudioSourceNode | null = null;
+    let destination: any = null;
+    let mediaRecorder: MediaRecorder | null = null;
+    let chunks: BlobPart[] = [];
+    
+    video.onloadedmetadata = () => {
+      onProgress?.(10, "Preparing audio extraction...");
+      
+      try {
+        source = audioContext.createMediaElementSource(video);
+        destination = audioContext.createMediaStreamDestination();
+        source.connect(destination);
+        source.connect(audioContext.destination);
+        
+        const stream = destination.stream;
+        mediaRecorder = new MediaRecorder(stream, {
+          mimeType: 'audio/webm;codecs=opus'
+        });
+        
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            chunks.push(e.data);
+          }
+        };
+        
+        mediaRecorder.onstop = async () => {
+          onProgress?.(90, "Processing audio...");
+          const webmBlob = new Blob(chunks, { type: 'audio/webm' });
+          
+          // Convert WebM to WAV
+          try {
+            const arrayBuffer = await webmBlob.arrayBuffer();
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            
+            // Convert AudioBuffer to WAV
+            const wavBlob = audioBufferToWav(audioBuffer);
+            URL.revokeObjectURL(video.src);
+            onProgress?.(100, "Audio extracted");
+            resolve(wavBlob);
+          } catch (e) {
+            reject(new Error(`Failed to convert audio: ${e instanceof Error ? e.message : 'Unknown error'}`));
+          }
+        };
+        
+        video.currentTime = 0;
+        video.play().then(() => {
+          mediaRecorder?.start();
+          onProgress?.(20, "Recording audio...");
+        }).catch(reject);
+        
+      } catch (e) {
+        reject(new Error(`Web Audio API error: ${e instanceof Error ? e.message : 'Unknown error'}`));
+      }
+    };
+    
+    video.onerror = () => {
+      reject(new Error("Failed to load video file"));
+    };
+    
+    video.onended = () => {
+      mediaRecorder?.stop();
+    };
+    
+    // Set a timeout to prevent infinite recording
+    setTimeout(() => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      }
+    }, 15 * 60 * 1000); // 15 minute max
+  });
+}
+
+function audioBufferToWav(buffer: AudioBuffer): Blob {
+  const numChannels = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const format = 1; // PCM
+  const bitDepth = 16;
+  
+  const bytesPerSample = bitDepth / 8;
+  const blockAlign = numChannels * bytesPerSample;
+  
+  const dataLength = buffer.length * blockAlign;
+  const bufferLength = 44 + dataLength;
+  
+  const arrayBuffer = new ArrayBuffer(bufferLength);
+  const view = new DataView(arrayBuffer);
+  
+  // WAV header
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + dataLength, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, format, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitDepth, true);
+  writeString(view, 36, 'data');
+  view.setUint32(40, dataLength, true);
+  
+  // Write audio data
+  const channels: Float32Array[] = [];
+  for (let i = 0; i < numChannels; i++) {
+    channels.push(buffer.getChannelData(i));
+  }
+  
+  let offset = 44;
+  for (let i = 0; i < buffer.length; i++) {
+    for (let channel = 0; channel < numChannels; channel++) {
+      const sample = Math.max(-1, Math.min(1, channels[channel][i]));
+      const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+      view.setInt16(offset, intSample, true);
+      offset += 2;
+    }
+  }
+  
+  return new Blob([arrayBuffer], { type: 'audio/wav' });
+}
+
+function writeString(view: DataView, offset: number, string: string) {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
+}
+
 export async function loadFFmpeg(
   onProgress?: ProgressCallback
 ): Promise<FFmpeg> {
