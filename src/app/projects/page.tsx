@@ -32,6 +32,19 @@ export default function ProjectsDashboard() {
       await updateProject(projectId, { status: "extracting", progressMessage: "Saving local file to workspace...", progress: 20 });
       await updateProject(projectId, { title: file.name, progress: 30 });
 
+      // Save file to OPFS so studio page can load it later
+      try {
+        const dir = await navigator.storage.getDirectory();
+        const cacheDir = await dir.getDirectoryHandle('video-cache', { create: true });
+        const fileHandle = await cacheDir.getFileHandle(`video-${projectId}.mp4`, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(file);
+        await writable.close();
+      } catch (e) {
+        console.error("Failed to save file to OPFS:", e);
+        // Continue without OPFS save - studio page won't work but processing will
+      }
+
       // Generate thumbnail from uploaded video
       try {
         const url = URL.createObjectURL(file);
