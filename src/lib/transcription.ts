@@ -104,43 +104,64 @@ async function transcribeChunked(
     const formData = new FormData();
     formData.append("file", chunkBlob, `audio_chunk_${i}.wav`);
 
-    try {
-      const response = await fetch("/api/transcribe", {
-        method: "POST",
-        body: formData,
-      });
+    // Retry logic with exponential backoff for rate limiting
+    let retries = 3;
+    let delay = 1000; // Start with 1 second
+    
+    while (retries > 0) {
+      try {
+        const response = await fetch("/api/transcribe", {
+          method: "POST",
+          body: formData,
+        });
 
-      if (!response.ok) {
-        console.warn(`Chunk ${i + 1}/${numChunks} transcription failed`);
-        continue;
-      }
+        if (response.status === 429) {
+          // Rate limited - wait and retry
+          console.warn(`Chunk ${i + 1}/${numChunks} rate limited, retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 2; // Exponential backoff
+          retries--;
+          continue;
+        }
 
-      const result: TranscriptionResult = await response.json();
-      language = result.language || language;
+        if (!response.ok) {
+          console.warn(`Chunk ${i + 1}/${numChunks} transcription failed with status ${response.status}`);
+          break;
+        }
 
-      // Offset all timestamps by the chunk's time offset
-      const offsetSegments = result.segments.map((seg) => ({
-        ...seg,
-        start: seg.start + timeOffset,
-        end: seg.end + timeOffset,
-        words: seg.words.map((w) => ({
+        const result: TranscriptionResult = await response.json();
+        language = result.language || language;
+
+        // Offset all timestamps by the chunk's time offset
+        const offsetSegments = result.segments.map((seg) => ({
+          ...seg,
+          start: seg.start + timeOffset,
+          end: seg.end + timeOffset,
+          words: seg.words.map((w) => ({
+            ...w,
+            start: w.start + timeOffset,
+            end: w.end + timeOffset,
+          })),
+        }));
+
+        const offsetWords = result.words.map((w) => ({
           ...w,
           start: w.start + timeOffset,
           end: w.end + timeOffset,
-        })),
-      }));
+        }));
 
-      const offsetWords = result.words.map((w) => ({
-        ...w,
-        start: w.start + timeOffset,
-        end: w.end + timeOffset,
-      }));
-
-      allSegments.push(...offsetSegments);
-      allWords.push(...offsetWords);
-      fullText += (fullText ? " " : "") + result.text;
-    } catch (e) {
-      console.warn(`Chunk ${i + 1}/${numChunks} error:`, e);
+        allSegments.push(...offsetSegments);
+        allWords.push(...offsetWords);
+        fullText += (fullText ? " " : "") + result.text;
+        break; // Success, exit retry loop
+      } catch (e) {
+        console.warn(`Chunk ${i + 1}/${numChunks} error:`, e);
+        if (retries > 0) {
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 2;
+          retries--;
+        }
+      }
     }
   }
 

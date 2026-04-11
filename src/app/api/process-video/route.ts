@@ -17,18 +17,10 @@ async function ensureTempDir() {
 }
 
 // Extract audio from video using server-side FFmpeg
-// For long videos, only extract first 10 minutes to avoid serverless timeout
-async function extractAudioServer(videoPath: string, outputPath: string, duration: number): Promise<void> {
-  const MAX_DURATION = 10 * 60; // 10 minutes max to avoid serverless timeout
-  const extractionDuration = Math.min(duration, MAX_DURATION);
-  
+async function extractAudioServer(videoPath: string, outputPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const command = ffmpeg(videoPath);
-    
-    if (duration > MAX_DURATION) {
-      // Only extract first 10 minutes for long videos
-      command.seekInput(0).outputOptions([
-        "-t", extractionDuration.toString(),
+    ffmpeg(videoPath)
+      .outputOptions([
         "-vn",
         "-acodec",
         "pcm_s16le",
@@ -36,21 +28,7 @@ async function extractAudioServer(videoPath: string, outputPath: string, duratio
         "16000",
         "-ac",
         "1"
-      ]);
-    } else {
-      // Extract full audio for short videos
-      command.outputOptions([
-        "-vn",
-        "-acodec",
-        "pcm_s16le",
-        "-ar",
-        "16000",
-        "-ac",
-        "1"
-      ]);
-    }
-    
-    command
+      ])
       .output(outputPath)
       .on("end", () => resolve())
       .on("error", (err: Error) => reject(err))
@@ -81,7 +59,7 @@ export async function POST(req: NextRequest) {
     await writeFile(videoPath, buffer);
 
     // Extract audio
-    await extractAudioServer(videoPath, audioPath, duration);
+    await extractAudioServer(videoPath, audioPath);
 
     // Read audio file
     const audioBuffer = await readFile(audioPath);
