@@ -157,12 +157,21 @@ function StudioInner() {
         const proj = await getProject(clip.projectId);
         if (!proj) throw new Error("Project not found");
 
-        const dir = await navigator.storage.getDirectory();
-        const cacheDir = await dir.getDirectoryHandle('video-cache');
-        const fileHandle = await cacheDir.getFileHandle(`video-${proj.id}.mp4`);
-        const file = await fileHandle.getFile();
+        let file: File;
+        let url: string;
+        
+        try {
+          const dir = await navigator.storage.getDirectory();
+          const cacheDir = await dir.getDirectoryHandle('video-cache');
+          const fileHandle = await cacheDir.getFileHandle(`video-${proj.id}.mp4`);
+          file = await fileHandle.getFile();
+          url = URL.createObjectURL(file);
+        } catch (opfsError) {
+          // OPFS file not found - video might have been cleared
+          console.error("OPFS file not found:", opfsError);
+          throw new Error("Video file not found in browser storage. Please re-upload the video to the project.");
+        }
 
-        const url = URL.createObjectURL(file);
         // We set duration locally so timeline isn't completely massive
         setVideo({ file, url, duration: proj.duration || 0, width: 1080, height: 1920, thumbnail: proj.thumbnailUrl || "", title: clip.title });
         setTranscription(clip.transcriptChunk);
@@ -175,7 +184,7 @@ function StudioInner() {
         setSidebarTab("captions");
       } catch (err: any) {
         setStage("error");
-        setError("Failed to load clip from local storage. Did you clear your browser data? " + err.message);
+        setError("Failed to load clip: " + err.message + ". Please re-upload the video to the project and try again.");
       }
     }
     loadClipFromDB();

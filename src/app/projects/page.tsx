@@ -7,7 +7,7 @@ import Header from "@/components/Header";
 import styles from "./projects.module.css";
 import { getViralityColor, getViralityLabel, analyzeTranscript } from "@/lib/ai-analysis";
 import { streamUrlToOPFS } from "@/lib/opfs";
-import { extractAudio, getVideoInfo } from "@/lib/ffmpeg";
+import { extractAudio, getVideoInfo, generateThumbnail } from "@/lib/ffmpeg";
 import { transcribeAudio } from "@/lib/transcription";
 
 export default function ProjectsDashboard() {
@@ -31,6 +31,17 @@ export default function ProjectsDashboard() {
       
       await updateProject(projectId, { status: "extracting", progressMessage: "Saving local file to workspace...", progress: 20 });
       await updateProject(projectId, { title: file.name, progress: 30 });
+
+      // Generate thumbnail from uploaded video
+      try {
+        const url = URL.createObjectURL(file);
+        const thumbnail = await generateThumbnail(url, 1);
+        URL.revokeObjectURL(url);
+        await updateProject(projectId, { thumbnailUrl: thumbnail });
+      } catch (e) {
+        console.error("Thumbnail generation failed:", e);
+        // Continue without thumbnail
+      }
 
       // --- 3. Extract Audio ---
       await updateProject(projectId, { progressMessage: "Parsing Audio...", progress: 40 });
