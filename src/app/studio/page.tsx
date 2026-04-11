@@ -29,6 +29,9 @@ interface VideoState {
 // 4 hour maximum processable duration in browser with WORKERFS
 const MAX_BROWSER_DURATION = 4 * 60 * 60; 
 
+// Hard limit to prevent browser crashes on very long videos
+const MAX_SAFE_VIDEO_DURATION = 20 * 60; // 20 minutes max for stability 
+
 type SidebarTab = "ai" | "captions" | "media" | "brand" | "broll" | "transitions" | "text" | "music" | null;
 
 const HIGHLIGHT_KEYWORDS = new Set(["amazing","incredible","insane","crazy","billion","million","money","dollars","viral","trending","breaking","important","never","always","best","worst","extraordinary","unbelievable"]);
@@ -212,6 +215,13 @@ function StudioInner() {
       setStage("loading-ffmpeg");
       setStageMessage("Loading video engine...");
       const info = await getVideoInfo(file);
+      
+      // Reject videos over 20 minutes to prevent browser crashes
+      if (info.duration > MAX_SAFE_VIDEO_DURATION) {
+        const durationMins = Math.round(info.duration / 60);
+        throw new Error(`Video is too long (${durationMins} minutes). Maximum supported duration is 20 minutes for browser-based processing to prevent crashes. Please use a shorter video or trim it first.`);
+      }
+      
       const url = URL.createObjectURL(file);
       const thumb = await generateThumbnail(url, 1);
       setVideo({ file, url, duration: info.duration, width: info.width, height: info.height, thumbnail: thumb, title: title || file.name.replace(/\.[^.]+$/, "") || "Untitled Clip" });
