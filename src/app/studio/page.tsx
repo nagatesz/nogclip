@@ -224,16 +224,19 @@ function StudioInner() {
       for (let t = 0; t < info.duration; t += thumbInterval) thumbPromises.push(generateThumbnail(url, t));
       Promise.all(thumbPromises).then(thumbs => setThumbnails(thumbs.filter(t => t !== "")));
 
+      const MAX_SAFE_DURATION = 15 * 60; // 15 minutes max for safety
       const onFFmpegProgress: ProgressCallback = (_p, msg) => setStageMessage(msg);
-      await loadFFmpeg(onFFmpegProgress);
+      
+      // Only load FFmpeg if we're going to use it (short videos)
+      if (info.duration <= MAX_SAFE_DURATION) {
+        await loadFFmpeg(onFFmpegProgress);
+      }
 
       setStage("extracting-audio");
       setStageMessage("Extracting audio track...");
       
       let extractionDuration = info.duration;
       let audioBlob: Blob;
-      // Limit extraction to prevent memory crashes and FS errors
-      const MAX_SAFE_DURATION = 15 * 60; // 15 minutes max for safety
       
       // Use Web Audio API directly for long videos to bypass FFmpeg FS errors
       if (extractionDuration > MAX_SAFE_DURATION) {

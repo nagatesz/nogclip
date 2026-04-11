@@ -30,29 +30,31 @@ export async function extractAudioWithWebAudio(
     video.src = URL.createObjectURL(videoFile);
     video.muted = false;
     video.crossOrigin = 'anonymous';
+    video.preload = 'auto';
     
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({
-      sampleRate: 16000
-    });
-    
-    let source: MediaElementAudioSourceNode | null = null;
-    let destination: any = null;
     let mediaRecorder: MediaRecorder | null = null;
-    let chunks: BlobPart[] = [];
+    
+    onProgress?.(5, "Loading video...");
     
     video.onloadedmetadata = () => {
-      onProgress?.(10, "Preparing audio extraction...");
+      onProgress?.(10, "Extracting audio...");
       
       try {
-        source = audioContext.createMediaElementSource(video);
-        destination = audioContext.createMediaStreamDestination();
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({
+          sampleRate: 16000
+        });
+        
+        const source = audioContext.createMediaElementSource(video);
+        const destination = audioContext.createMediaStreamDestination();
         source.connect(destination);
-        source.connect(audioContext.destination);
         
         const stream = destination.stream;
         mediaRecorder = new MediaRecorder(stream, {
-          mimeType: 'audio/webm;codecs=opus'
+          mimeType: 'audio/webm;codecs=opus',
+          audioBitsPerSecond: 128000
         });
+        
+        const chunks: BlobPart[] = [];
         
         mediaRecorder.ondataavailable = (e) => {
           if (e.data.size > 0) {
@@ -62,14 +64,10 @@ export async function extractAudioWithWebAudio(
         
         mediaRecorder.onstop = async () => {
           onProgress?.(90, "Processing audio...");
-          const webmBlob = new Blob(chunks, { type: 'audio/webm' });
-          
-          // Convert WebM to WAV
           try {
+            const webmBlob = new Blob(chunks, { type: 'audio/webm' });
             const arrayBuffer = await webmBlob.arrayBuffer();
             const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-            
-            // Convert AudioBuffer to WAV
             const wavBlob = audioBufferToWav(audioBuffer);
             URL.revokeObjectURL(video.src);
             onProgress?.(100, "Audio extracted");
@@ -79,11 +77,21 @@ export async function extractAudioWithWebAudio(
           }
         };
         
+        // Start recording and play video
         video.currentTime = 0;
-        video.play().then(() => {
-          mediaRecorder?.start();
-          onProgress?.(20, "Recording audio...");
-        }).catch(reject);
+        mediaRecorder.start();
+        video.play().catch((err) => {
+          console.error("Video play error:", err);
+          mediaRecorder?.stop();
+        });
+        
+        // Stop after 15 minutes
+        setTimeout(() => {
+          if (mediaRecorder && mediaRecorder.state === 'recording') {
+            video.pause();
+            mediaRecorder.stop();
+          }
+        }, 15 * 60 * 1000);
         
       } catch (e) {
         reject(new Error(`Web Audio API error: ${e instanceof Error ? e.message : 'Unknown error'}`));
@@ -95,15 +103,10 @@ export async function extractAudioWithWebAudio(
     };
     
     video.onended = () => {
-      mediaRecorder?.stop();
-    };
-    
-    // Set a timeout to prevent infinite recording
-    setTimeout(() => {
       if (mediaRecorder && mediaRecorder.state === 'recording') {
         mediaRecorder.stop();
       }
-    }, 15 * 60 * 1000); // 15 minute max
+    };
   });
 }
 
