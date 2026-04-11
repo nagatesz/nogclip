@@ -77,6 +77,10 @@ function StudioInner() {
   const [captionsEnabled, setCaptionsEnabled] = useState(true);
   const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
   const [wordColorPickerIdx, setWordColorPickerIdx] = useState<number | null>(null);
+  const [addingWord, setAddingWord] = useState(false);
+  const [newWordText, setNewWordText] = useState("");
+  const [newWordStart, setNewWordStart] = useState(0);
+  const [newWordEnd, setNewWordEnd] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -334,6 +338,30 @@ function StudioInner() {
   };
   const handleCanvasMouseUp = () => { setIsDraggingCanvas(false); };
 
+  const handleAddWord = () => {
+    if (!transcription || !newWordText.trim()) return;
+    
+    const newWord = {
+      word: newWordText.trim(),
+      start: newWordStart,
+      end: newWordEnd
+    };
+    
+    // Insert word in correct position based on start time
+    const updatedWords = [...transcription.words, newWord].sort((a, b) => a.start - b.start);
+    
+    setTranscription({ ...transcription, words: updatedWords });
+    setAddingWord(false);
+    setNewWordText("");
+    showToast("Word added successfully!", "success");
+  };
+
+  const handleSetWordTiming = () => {
+    if (!videoRef.current) return;
+    setNewWordStart(videoRef.current.currentTime);
+    setNewWordEnd(videoRef.current.currentTime + 0.5); // Default 0.5s duration
+  };
+
   const selectClip = (clip: ClipSuggestion) => {
     setSelectedClip(clip); setTrimStart(clip.start); setTrimEnd(clip.end);
     setVideo(v => ({ ...v, title: clip.title }));
@@ -546,9 +574,89 @@ function StudioInner() {
               <input type="checkbox" defaultChecked />
               Transcript only
             </label>
-            <span style={{ fontSize: 11, color: "#64748b", fontWeight: "normal" }}>Click active word to edit</span>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button 
+                onClick={() => {
+                  setAddingWord(!addingWord);
+                  if (!addingWord) {
+                    handleSetWordTiming();
+                  }
+                }}
+                style={{ 
+                  background: addingWord ? "#3b82f6" : "#1e293b", 
+                  color: "white", 
+                  border: "none", 
+                  padding: "4px 8px", 
+                  borderRadius: 4, 
+                  fontSize: 11, 
+                  cursor: "pointer" 
+                }}
+              >
+                {addingWord ? "Cancel" : "+ Add Word"}
+              </button>
+              <span style={{ fontSize: 11, color: "#64748b", fontWeight: "normal" }}>Click active word to edit</span>
+            </div>
           </div>
           <div className="transcript-body" ref={transcriptBodyRef}>
+            {addingWord && (
+              <div style={{ background: "#1e293b", padding: 12, borderRadius: 8, marginBottom: 12, border: "1px solid #3b82f6" }}>
+                <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>Add new word at current position</div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                  <input 
+                    type="text" 
+                    placeholder="Enter word..." 
+                    value={newWordText}
+                    onChange={(e) => setNewWordText(e.target.value)}
+                    style={{ 
+                      flex: 1, 
+                      background: "rgba(0,0,0,0.3)", 
+                      border: "1px solid rgba(255,255,255,0.2)", 
+                      color: "#fff", 
+                      padding: "6px 8px", 
+                      fontSize: 13, 
+                      borderRadius: 4, 
+                      outline: "none" 
+                    }} 
+                  />
+                </div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 8, fontSize: 11, color: "#64748b" }}>
+                  <div>Start: {formatTime(newWordStart)}</div>
+                  <div>End: {formatTime(newWordEnd)}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button 
+                    onClick={handleSetWordTiming}
+                    style={{ 
+                      background: "#1e293b", 
+                      color: "white", 
+                      border: "1px solid rgba(255,255,255,0.2)", 
+                      padding: "4px 8px", 
+                      borderRadius: 4, 
+                      fontSize: 11, 
+                      cursor: "pointer" 
+                    }}
+                  >
+                    Set from current time
+                  </button>
+                  <button 
+                    onClick={handleAddWord}
+                    disabled={!newWordText.trim()}
+                    style={{ 
+                      background: newWordText.trim() ? "#3b82f6" : "#1e293b", 
+                      color: "white", 
+                      border: "none", 
+                      padding: "4px 8px", 
+                      borderRadius: 4, 
+                      fontSize: 11, 
+                      cursor: newWordText.trim() ? "pointer" : "not-allowed",
+                      opacity: newWordText.trim() ? 1 : 0.5
+                    }}
+                  >
+                    Add Word
+                  </button>
+                </div>
+              </div>
+            )}
             {transcription ? (
               transcription.words.map((word, i) => {
                 const isActive = currentTime >= word.start && currentTime <= word.end + 0.1;
