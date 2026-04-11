@@ -88,6 +88,7 @@ function StudioInner() {
   const [chunkedParts, setChunkedParts] = useState<{ id: string; name: string; start: number; end: number; duration: number; transcription?: TranscriptionResult; status: "pending"|"processing"|"completed"|"failed" }[]>([]);
   const [videoId, setVideoId] = useState<string>("");
   const [isChunking, setIsChunking] = useState(false);
+  const [chunkMode, setChunkMode] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -365,8 +366,12 @@ function StudioInner() {
     if (!file.type.startsWith("video/") && !file.name.match(/\.(mp4|webm|mov|avi|mkv)$/i)) {
       showToast("Please upload a video file", "error"); return;
     }
-    processVideo(file);
-  }, [processVideo, showToast]);
+    if (chunkMode) {
+      handleChunkVideo(file);
+    } else {
+      processVideo(file);
+    }
+  }, [processVideo, showToast, chunkMode]);
 
   const togglePlay = useCallback(() => {
     if (!videoRef.current) return;
@@ -668,11 +673,43 @@ function StudioInner() {
         <section className="upload-section">
           <div className="upload-container">
             <div style={{ textAlign: "center", marginBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "center", gap: 12, marginBottom: 8 }}>
+                <button
+                  onClick={() => setChunkMode(false)}
+                  style={{
+                    background: !chunkMode ? "#8b5cf6" : "#1e293b",
+                    color: "white",
+                    border: "none",
+                    padding: "8px 16px",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: 600,
+                  }}
+                >
+                  Normal Mode
+                </button>
+                <button
+                  onClick={() => setChunkMode(true)}
+                  style={{
+                    background: chunkMode ? "#8b5cf6" : "#1e293b",
+                    color: "white",
+                    border: "none",
+                    padding: "8px 16px",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: 600,
+                  }}
+                >
+                  Chunk Mode (20-min parts)
+                </button>
+              </div>
               <div style={{ fontSize: 28, fontWeight: 800, color: "#e2e8f0", letterSpacing: -0.5 }}>
-                Drop a video or paste a YouTube link
+                {chunkMode ? "Chunk long videos into 20-minute parts" : "Drop a video or paste a YouTube link"}
               </div>
               <div style={{ fontSize: 13, color: "#4b5563", marginTop: 4 }}>
-                AI finds the best clips, adds captions, scores virality — in minutes
+                {chunkMode ? "Process long videos sequentially to avoid rate limits" : "AI finds the best clips, adds captions, scores virality — in minutes"}
               </div>
             </div>
 
@@ -687,21 +724,110 @@ function StudioInner() {
               </div>
             </div>
 
-            <div className="yt-or-divider">or upload a file</div>
+            {chunkMode && chunkedParts.length > 0 ? (
+              <>
+                <div style={{ padding: 20, background: "rgba(139, 92, 246, 0.1)", border: "1px solid rgba(139, 92, 246, 0.3)", borderRadius: 12, marginBottom: 16 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: "#e2e8f0" }}>
+                      Video Parts ({chunkedParts.length})
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const fileInput = document.createElement("input");
+                      fileInput.type = "file";
+                      fileInput.accept = "video/*";
+                      fileInput.onchange = (e) => {
+                        const files = (e.target as HTMLInputElement).files;
+                        if (files && files[0]) {
+                          const file = files[0];
+                          setVideo({ file, url: URL.createObjectURL(file), duration: chunkedParts.reduce((sum, p) => sum + p.duration, 0), width: 1080, height: 1920, thumbnail: "", title: file.name });
+                          processChunkSequentially(file);
+                        }
+                      };
+                      fileInput.click();
+                    }}
+                    disabled={isChunking || chunkedParts.every(p => p.status === "completed" || p.status === "failed")}
+                    style={{
+                      width: "100%",
+                      background: isChunking ? "#4b5563" : "#8b5cf6",
+                      color: "white",
+                      border: "none",
+                      padding: "12px 16px",
+                      borderRadius: 8,
+                      cursor: isChunking ? "not-allowed" : "pointer",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      marginBottom: 16,
+                    }}
+                  >
+                    {isChunking ? "Processing..." : "Process All Parts Sequentially"}
+                  </button>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {chunkedParts.map((part, idx) => (
+                      <div key={part.id} style={{ 
+                        padding: 12, 
+                        background: "rgba(255,255,255,0.02)", 
+                        border: `1px solid ${part.status === "completed" ? "rgba(34, 197, 94, 0.3)" : part.status === "failed" ? "rgba(239, 68, 68, 0.3)" : "rgba(255,255,255,0.05)"}`, 
+                        borderRadius: 8 
+                      }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={{ fontSize: 14, fontWeight: 600, color: "#e2e8f0" }}>{part.name}</span>
+                          <span style={{ fontSize: 12, color: part.status === "completed" ? "#22c55e" : part.status === "failed" ? "#ef4444" : "#64748b" }}>
+                            {part.status === "pending" && "⏳ Pending"}
+                            {part.status === "processing" && "⏳ Processing"}
+                            {part.status === "completed" && "✓ Done"}
+                            {part.status === "failed" && "✗ Failed"}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>{formatTime(part.start)} → {formatTime(part.end)} · {formatTime(part.duration)}</div>
+                        {part.transcription && (
+                          <div style={{ marginTop: 6, fontSize: 11, color: "#22c55e" }}>
+                            {part.transcription.words.length} words transcribed
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setChunkedParts([]);
+                    setVideoId("");
+                  }}
+                  style={{
+                    width: "100%",
+                    background: "#1e293b",
+                    color: "white",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    padding: "10px 16px",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    fontSize: 13,
+                  }}
+                >
+                  Reset
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="yt-or-divider">or upload a file</div>
 
-            <div ref={undefined} className={`upload-zone ${isDragOver ? "drag-over" : ""}`}
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={e => { e.preventDefault(); setIsDragOver(true); }}
-              onDragLeave={() => setIsDragOver(false)}
-              onDrop={e => { e.preventDefault(); setIsDragOver(false); handleFileSelect(e.dataTransfer.files); }}>
-              <span className="upload-icon">🎬</span>
-              <h2 className="upload-title">Drop your video here</h2>
-              <p className="upload-subtitle">Supports MP4, MOV, WebM, AVI, MKV · Any length</p>
-              <div className="upload-formats">
-                {["MP4","MOV","WebM","AVI","MKV"].map(fmt => <span key={fmt} className="upload-format-tag">.{fmt.toLowerCase()}</span>)}
-              </div>
-              <input ref={fileInputRef} className="upload-input" type="file" accept="video/*" onChange={e => handleFileSelect(e.target.files)} />
-            </div>
+                <div ref={undefined} className={`upload-zone ${isDragOver ? "drag-over" : ""}`}
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={e => { e.preventDefault(); setIsDragOver(true); }}
+                  onDragLeave={() => setIsDragOver(false)}
+                  onDrop={e => { e.preventDefault(); setIsDragOver(false); handleFileSelect(e.dataTransfer.files); }}>
+                  <span className="upload-icon">🎬</span>
+                  <h2 className="upload-title">Drop your video here</h2>
+                  <p className="upload-subtitle">Supports MP4, MOV, WebM, AVI, MKV · Any length</p>
+                  <div className="upload-formats">
+                    {["MP4","MOV","WebM","AVI","MKV"].map(fmt => <span key={fmt} className="upload-format-tag">.{fmt.toLowerCase()}</span>)}
+                  </div>
+                  <input ref={fileInputRef} className="upload-input" type="file" accept="video/*" onChange={e => handleFileSelect(e.target.files)} />
+                </div>
+              </>
+            )}
 
             {stage !== "idle" && (
               <div className="processing-status">
