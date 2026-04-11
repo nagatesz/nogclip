@@ -15,7 +15,7 @@ export default function ProjectsDashboard() {
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [activeClips, setActiveClips] = useState<Clip[]>([]);
   const [loading, setLoading] = useState(true);
-  const [downloadService, setDownloadService] = useState<"cobalt" | "manual">("cobalt");
+  const [downloadService, setDownloadService] = useState<"cobalt" | "yt1s" | "manual">("cobalt");
 
   const resolveYoutubeUrlServerSide = async (url: string) => {
     try {
@@ -265,9 +265,10 @@ export default function ProjectsDashboard() {
                   className="input"
                   style={{ maxWidth: '500px', width: '100%' }}
                   value={downloadService}
-                  onChange={(e) => setDownloadService(e.target.value as "cobalt" | "manual")}
+                  onChange={(e) => setDownloadService(e.target.value as "cobalt" | "yt1s" | "manual")}
                 >
                   <option value="cobalt">Cobalt API (Fast, but may fail on some videos)</option>
+                  <option value="yt1s">yt1s API (Alternative service)</option>
                   <option value="manual">Manual Upload (Most reliable)</option>
                 </select>
               </div>
@@ -304,7 +305,7 @@ export default function ProjectsDashboard() {
                 </button>
               </div>
               <p style={{ marginTop: '1rem', fontSize: '0.8rem', opacity: 0.6 }}>
-                💡 Tip: If Cobalt API fails, switch to Manual Upload or download the video yourself.
+                💡 Tip: Try Cobalt API first. If it fails, switch to yt1s API or Manual Upload.
               </p>
             </div>
           ) : (

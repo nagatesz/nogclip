@@ -4,8 +4,8 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 /**
- * YouTube download API using Cobalt API
- * Users can choose between Cobalt API or manual upload
+ * YouTube download API using multiple services
+ * Users can choose between Cobalt API, yt1s API, or manual upload
  */
 
 const COBALT_INSTANCES = [
@@ -35,7 +35,7 @@ async function tryCobaltAPI(url: string) {
       
       const data = await res.json();
       if (data.status === "error") continue;
-      if (data.url) {
+      if (data.url && !data.url.includes("youtube.com/watch") && !data.url.includes("youtu.be")) {
         return {
           url: data.url,
           title: data.filename || "YouTube Video",
@@ -50,6 +50,47 @@ async function tryCobaltAPI(url: string) {
   return null;
 }
 
+async function tryYt1sAPI(url: string) {
+  try {
+    // yt1s.com API endpoint
+    const apiUrl = "https://yt1s.com/api/ajaxSearch/index";
+    const formData = new URLSearchParams();
+    formData.append("q", url);
+    formData.append("vt", "home");
+    
+    const res = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: formData,
+      signal: AbortSignal.timeout(15000),
+    });
+    
+    if (!res.ok) return null;
+    
+    const data = await res.json();
+    if (data.links && data.links.mp4) {
+      // Get the best quality
+      const mp4Links = data.links.mp4;
+      const qualities = Object.keys(mp4Links);
+      if (qualities.length === 0) return null;
+      
+      const bestQuality = qualities[qualities.length - 1];
+      const videoUrl = mp4Links[bestQuality].url;
+      
+      if (videoUrl && !videoUrl.includes("youtube.com/watch") && !videoUrl.includes("youtu.be")) {
+        return {
+          url: videoUrl,
+          title: data.title || "YouTube Video",
+          thumbnail: data.thumbnail,
+        };
+      }
+    }
+  } catch (e) {
+    console.error("yt1s API failed:", e);
+  }
+  return null;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { url, service = "cobalt" } = await request.json();
@@ -60,7 +101,6 @@ export async function POST(request: NextRequest) {
     if (!videoId) return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
 
     if (service === "cobalt") {
-      // Try Cobalt API
       const result = await tryCobaltAPI(url);
       if (result) {
         return NextResponse.json({ 
@@ -73,7 +113,24 @@ export async function POST(request: NextRequest) {
       }
       
       return NextResponse.json({ 
-        error: "Cobalt API failed. Try switching to Manual Upload or try again later." 
+        error: "Cobalt API failed. Try switching to yt1s API or Manual Upload." 
+      }, { status: 400 });
+    }
+
+    if (service === "yt1s") {
+      const result = await tryYt1sAPI(url);
+      if (result) {
+        return NextResponse.json({ 
+          url: result.url,
+          title: result.title,
+          thumbnail: result.thumbnail || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+          status: "ok",
+          useProxy: false
+        });
+      }
+      
+      return NextResponse.json({ 
+        error: "yt1s API failed. Try switching to Cobalt API or Manual Upload." 
       }, { status: 400 });
     }
 
