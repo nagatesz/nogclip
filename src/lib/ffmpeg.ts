@@ -20,6 +20,29 @@ export interface ExportOptions {
 
 export type ProgressCallback = (progress: number, message: string) => void;
 
+// Memory management
+export function cleanupMemory() {
+  // Force garbage collection if available (Chrome with --js-flags flag)
+  if (typeof (window as any).gc === 'function') {
+    (window as any).gc();
+  }
+  
+  // Clear large objects from memory
+  if (ffmpegInstance) {
+    // Terminate any running processes
+    try {
+      ffmpegInstance.terminate();
+    } catch (e) {
+      // Ignore termination errors
+    }
+  }
+  
+  // Revoke any object URLs
+  const oldUrls: string[] = (window as any).__revokedUrls || [];
+  oldUrls.forEach(url => URL.revokeObjectURL(url));
+  (window as any).__revokedUrls = [];
+}
+
 export async function loadFFmpeg(
   onProgress?: ProgressCallback
 ): Promise<FFmpeg> {
@@ -88,8 +111,14 @@ export async function extractAudio(
 
   const outputName = "audio.wav";
   
-  try { await ffmpeg.createDir("/worker"); } catch {}
+  // Cleanup previous mounts
   try { await ffmpeg.unmount("/worker"); } catch {}
+  try { await ffmpeg.deleteFile(outputName); } catch {}
+  
+  // Force garbage collection hint
+  if (typeof (window as any).gc === 'function') {
+    (window as any).gc();
+  }
   
   await ffmpeg.mount("WORKERFS" as any, { blobs: [{ name: "input.mp4", data: videoFile }] }, "/worker");
 
@@ -131,8 +160,14 @@ export async function extractAudioChunk(
 
   const outputName = `chunk_${startSec}.wav`;
 
-  try { await ffmpeg.createDir("/worker"); } catch {}
+  // Cleanup previous mounts
   try { await ffmpeg.unmount("/worker"); } catch {}
+  try { await ffmpeg.deleteFile(outputName); } catch {}
+  
+  // Force garbage collection hint
+  if (typeof (window as any).gc === 'function') {
+    (window as any).gc();
+  }
   
   await ffmpeg.mount("WORKERFS" as any, { blobs: [{ name: "input.mp4", data: videoFile }] }, "/worker");
 

@@ -231,15 +231,39 @@ function StudioInner() {
       setStageMessage("Extracting audio track...");
       
       let extractionDuration = info.duration;
+      let audioBlob: Blob;
+      // Use smaller chunks for long videos to prevent memory crashes
+      const MAX_SAFE_DURATION = 10 * 60; // 10 minutes per chunk for safety
       if (extractionDuration > MAX_BROWSER_DURATION) {
         setStageMessage(`Extracting audio (First 30 minutes due to browser memory limits)...`);
         extractionDuration = MAX_BROWSER_DURATION;
         showToast("Long video detected. Analyzing the first 30 minutes.", "success");
+        audioBlob = await extractAudioChunk(file, 0, extractionDuration, onFFmpegProgress);
+      } else if (extractionDuration > MAX_SAFE_DURATION) {
+        setStageMessage(`Extracting audio in chunks to prevent memory issues...`);
+        // Process in 10-minute chunks for videos > 10 minutes
+        const chunks: Blob[] = [];
+        const chunkDuration = MAX_SAFE_DURATION;
+        let currentStart = 0;
+        
+        while (currentStart < extractionDuration) {
+          const chunkLength = Math.min(chunkDuration, extractionDuration - currentStart);
+          setStageMessage(`Extracting audio chunk ${Math.floor(currentStart / 60) + 1} of ${Math.ceil(extractionDuration / chunkDuration)}...`);
+          const chunkBlob = await extractAudioChunk(file, currentStart, chunkLength, onFFmpegProgress);
+          chunks.push(chunkBlob);
+          currentStart += chunkDuration;
+          
+          // Memory cleanup between chunks
+          if (typeof (window as any).gc === 'function') {
+            (window as any).gc();
+          }
+        }
+        
+        // Combine chunks
+        audioBlob = new Blob(chunks, { type: 'audio/wav' });
+      } else {
+        audioBlob = await extractAudio(file, onFFmpegProgress);
       }
-
-      const audioBlob = extractionDuration < info.duration 
-        ? await extractAudioChunk(file, 0, extractionDuration, onFFmpegProgress)
-        : await extractAudio(file, onFFmpegProgress);
 
       try { const wf = await generateWaveform(audioBlob, 400); setWaveformData(wf); } catch {}
 
