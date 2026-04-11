@@ -134,10 +134,21 @@ function StudioInner() {
       }
     };
     const onEnded = () => setIsPlaying(false);
+    const onLoadedData = () => {
+      // Video is loaded, seek to trim start if set
+      if (trimStart > 0 && v.currentTime !== trimStart) {
+        v.currentTime = trimStart;
+      }
+    };
     v.addEventListener("timeupdate", onTimeUpdate);
     v.addEventListener("ended", onEnded);
-    return () => { v.removeEventListener("timeupdate", onTimeUpdate); v.removeEventListener("ended", onEnded); };
-  }, [video.url, transcription, captionStyle, captionsEnabled]);
+    v.addEventListener("loadeddata", onLoadedData);
+    return () => { 
+      v.removeEventListener("timeupdate", onTimeUpdate); 
+      v.removeEventListener("ended", onEnded);
+      v.removeEventListener("loadeddata", onLoadedData);
+    };
+  }, [video.url, transcription, captionStyle, captionsEnabled, trimStart]);
 
   // Auto-scroll transcript
   useEffect(() => {
