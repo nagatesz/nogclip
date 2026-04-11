@@ -85,6 +85,28 @@ export async function analyzeTranscript(
     }
   }
 
+  // Fallback: if no clips were found, create a default clip from the first 30 seconds
+  if (allClips.length === 0 && segments.length > 0) {
+    const firstSegment = segments[0];
+    const fallbackClip: ClipSuggestion = {
+      id: `clip-fallback-${Date.now()}`,
+      title: "Video Introduction",
+      start: firstSegment.start,
+      end: Math.min(firstSegment.start + 30, segments[segments.length - 1].end),
+      viralityScore: 50,
+      reason: "AI analysis did not detect specific viral clips. This is a fallback clip from the beginning of the video.",
+      hookStrength: "medium",
+      emotionalPeak: false,
+      words: words.filter((w) => w.start >= firstSegment.start && w.end <= Math.min(firstSegment.start + 30, segments[segments.length - 1].end)),
+      text: segments
+        .filter((s) => s.start >= firstSegment.start && s.end <= Math.min(firstSegment.start + 30, segments[segments.length - 1].end))
+        .map((s) => s.text)
+        .join(" "),
+    };
+    allClips.push(fallbackClip);
+    summary = "AI analysis did not detect specific viral clips. A fallback clip from the beginning of the video has been provided.";
+  }
+
   return {
     clips: allClips.sort((a, b) => b.viralityScore - a.viralityScore),
     summary,
