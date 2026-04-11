@@ -15,57 +15,22 @@ export default function ProjectsDashboard() {
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [activeClips, setActiveClips] = useState<Clip[]>([]);
   const [loading, setLoading] = useState(true);
-  const [downloadService, setDownloadService] = useState<"cobalt" | "yt1s" | "lovd" | "savefrom" | "manual">("cobalt");
 
   const resolveYoutubeUrlServerSide = async (url: string) => {
-    try {
-      const res = await fetch("/api/youtube-download", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, format: "video", service: downloadService }),
-      });
-      
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.error || "Failed to resolve YouTube URL");
-      }
-      
-      const data = await res.json();
-      if (!data.url) throw new Error("No download URL returned");
-      
-      return { url: data.url, title: data.title, thumbnail: data.thumbnail, useProxy: data.useProxy };
-    } catch (err: any) {
-      throw new Error(err.message || "Failed to resolve YouTube URL. Please try uploading the file directly.");
-    }
+    throw new Error("YouTube downloads are not supported due to API limitations. Please download the video manually and upload it using the '📂 Upload File' button.");
   };
 
   const processProjectPipeline = async (projectId: string, input: string | File) => {
     try {
-      let ytUrl = typeof input === "string" ? input : "";
-      let streamUrl = "";
-      let useProxy = false;
-      
+      // Only file uploads are supported
       if (typeof input === "string") {
-        // --- 1. YouTube Flow ---
-        await updateProject(projectId, { status: "initializing", progressMessage: "Fetching YouTube Metadata...", progress: 5 });
-        const ytData = await resolveYoutubeUrlServerSide(ytUrl);
-        await updateProject(projectId, { title: ytData.title || "YouTube Video", thumbnailUrl: ytData.thumbnail });
-        streamUrl = ytData.url;
-        useProxy = ytData.useProxy || false;
+        throw new Error("YouTube downloads are not supported. Please upload a video file.");
       }
 
-      // --- 2. Handle data saving (from URL or File) ---
-      let file: File;
-      if (typeof input === "string") {
-        await updateProject(projectId, { status: "extracting", progressMessage: "Downloading safely to local disk...", progress: 20 });
-        file = await streamUrlToOPFS(streamUrl, `video-${projectId}.mp4`, (msg) => {
-           updateProject(projectId, { progressMessage: msg });
-        }, useProxy);
-      } else {
-        await updateProject(projectId, { status: "extracting", progressMessage: "Saving local file to workspace...", progress: 20 });
-        file = input; 
-        await updateProject(projectId, { title: file.name, progress: 30 });
-      }
+      let file: File = input;
+      
+      await updateProject(projectId, { status: "extracting", progressMessage: "Saving local file to workspace...", progress: 20 });
+      await updateProject(projectId, { title: file.name, progress: 30 });
 
       // --- 3. Extract Audio ---
       await updateProject(projectId, { progressMessage: "Parsing Audio...", progress: 40 });
@@ -255,60 +220,20 @@ export default function ProjectsDashboard() {
             <div className={styles.emptyState}>
               <div className={styles.emptyIcon}>🚀</div>
               <h2>Create a New Project</h2>
-              <p>Paste a YouTube link (even 2-3 hours long!) to generate viral AI clips.</p>
+              <p>Upload a video file to generate viral AI clips.</p>
               
-              <div style={{ marginTop: '1rem', marginBottom: '1rem' }}>
-                <label style={{ fontSize: '0.85rem', opacity: 0.7, marginBottom: '0.25rem', display: 'block' }}>
-                  Download Service:
-                </label>
-                <select 
-                  className="input"
-                  style={{ maxWidth: '500px', width: '100%' }}
-                  value={downloadService}
-                  onChange={(e) => setDownloadService(e.target.value as "cobalt" | "yt1s" | "lovd" | "savefrom" | "manual")}
-                >
-                  <option value="cobalt">Cobalt API (Try first)</option>
-                  <option value="yt1s">yt1s API (Alternative)</option>
-                  <option value="lovd">lovd API (Alternative)</option>
-                  <option value="savefrom">savefrom API (Alternative)</option>
-                  <option value="manual">Manual Upload (Most reliable)</option>
-                </select>
-              </div>
-              
-              <div style={{ marginTop: '2rem', display: 'flex', gap: '0.5rem', width: '100%', maxWidth: '500px' }}>
-                <input 
-                  type="text" 
-                  placeholder="https://youtube.com/watch?v=..." 
-                  className="input"
-                  style={{ flex: 1 }}
-                  id="yt-input"
-                  onKeyDown={async (e) => {
-                    if (e.key === 'Enter') {
-                       const val = e.currentTarget.value;
-                       if (val) handleCreateProject(val);
-                    }
-                  }}
-                />
+              <div style={{ marginTop: '2rem', display: 'flex', gap: '0.5rem', width: '100%', maxWidth: '500px', flexDirection: 'column' }}>
                 <button 
                   className="btn btn-primary"
-                  onClick={() => {
-                    const val = (document.getElementById('yt-input') as HTMLInputElement).value;
-                    if (val) handleCreateProject(val);
-                  }}
-                >
-                  Generate Clips
-                </button>
-                <button 
-                  className="btn btn-secondary"
                   onClick={() => fileInputRef.current?.click()}
-                  title="Upload a local video file if YouTube is blocked"
+                  style={{ padding: '1rem', fontSize: '1rem' }}
                 >
-                  📂 Upload File
+                  📂 Upload Video File
                 </button>
+                <p style={{ marginTop: '1rem', fontSize: '0.85rem', opacity: 0.7, textAlign: 'center' }}>
+                  Supports MP4, MOV, AVI, and other video formats
+                </p>
               </div>
-              <p style={{ marginTop: '1rem', fontSize: '0.8rem', opacity: 0.6 }}>
-                💡 Tip: Try Cobalt first, then yt1s, lovd, or savefrom. If all fail, use Manual Upload.
-              </p>
             </div>
           ) : (
             <div className={styles.projectWorkspace}>
