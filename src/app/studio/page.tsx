@@ -30,7 +30,7 @@ interface VideoState {
 const MAX_BROWSER_DURATION = 4 * 60 * 60; 
 
 // Hard limit to prevent browser crashes on very long videos
-const MAX_SAFE_VIDEO_DURATION = 20 * 60; // 20 minutes max for stability 
+const MAX_SAFE_VIDEO_DURATION = 60 * 60; // 1 hour max for stability 
 
 type SidebarTab = "ai" | "captions" | "media" | "brand" | "broll" | "transitions" | "text" | "music" | null;
 
@@ -216,12 +216,6 @@ function StudioInner() {
       setStageMessage("Loading video engine...");
       const info = await getVideoInfo(file);
       
-      // Reject videos over 20 minutes to prevent browser crashes
-      if (info.duration > MAX_SAFE_VIDEO_DURATION) {
-        const durationMins = Math.round(info.duration / 60);
-        throw new Error(`Video is too long (${durationMins} minutes). Maximum supported duration is 20 minutes for browser-based processing to prevent crashes. Please use a shorter video or trim it first.`);
-      }
-      
       const url = URL.createObjectURL(file);
       const thumb = await generateThumbnail(url, 1);
       setVideo({ file, url, duration: info.duration, width: info.width, height: info.height, thumbnail: thumb, title: title || file.name.replace(/\.[^.]+$/, "") || "Untitled Clip" });
@@ -242,11 +236,12 @@ function StudioInner() {
       
       let extractionDuration = info.duration;
       let audioBlob: Blob;
-      // Limit extraction to prevent memory crashes
-      if (extractionDuration > MAX_BROWSER_DURATION) {
-        setStageMessage(`Extracting audio (First 30 minutes due to browser memory limits)...`);
-        extractionDuration = MAX_BROWSER_DURATION;
-        showToast("Long video detected. Analyzing the first 30 minutes.", "success");
+      // Limit extraction to 15 minutes for videos over 15 minutes to prevent browser crashes
+      const MAX_AUDIO_DURATION = 15 * 60; // 15 minutes
+      if (extractionDuration > MAX_AUDIO_DURATION) {
+        setStageMessage(`Extracting audio (First 15 minutes to prevent browser crashes)...`);
+        extractionDuration = MAX_AUDIO_DURATION;
+        showToast("Long video detected. Processing first 15 minutes for stability.", "success");
         audioBlob = await extractAudioChunk(file, 0, extractionDuration, onFFmpegProgress);
       } else {
         audioBlob = await extractAudio(file, onFFmpegProgress);
