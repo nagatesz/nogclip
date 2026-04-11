@@ -5,7 +5,7 @@ export const maxDuration = 300;
 
 /**
  * YouTube download API using multiple services
- * Users can choose between Cobalt API, yt1s API, or manual upload
+ * Users can choose between Cobalt, yt1s, lovd, savefrom, or manual upload
  */
 
 const COBALT_INSTANCES = [
@@ -52,7 +52,6 @@ async function tryCobaltAPI(url: string) {
 
 async function tryYt1sAPI(url: string) {
   try {
-    // yt1s.com API endpoint
     const apiUrl = "https://yt1s.com/api/ajaxSearch/index";
     const formData = new URLSearchParams();
     formData.append("q", url);
@@ -69,7 +68,6 @@ async function tryYt1sAPI(url: string) {
     
     const data = await res.json();
     if (data.links && data.links.mp4) {
-      // Get the best quality
       const mp4Links = data.links.mp4;
       const qualities = Object.keys(mp4Links);
       if (qualities.length === 0) return null;
@@ -87,6 +85,55 @@ async function tryYt1sAPI(url: string) {
     }
   } catch (e) {
     console.error("yt1s API failed:", e);
+  }
+  return null;
+}
+
+async function tryLovdAPI(url: string) {
+  try {
+    const apiUrl = "https://lovd.com/api/convert";
+    const res = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+      signal: AbortSignal.timeout(15000),
+    });
+    
+    if (!res.ok) return null;
+    
+    const data = await res.json();
+    if (data.url && !data.url.includes("youtube.com/watch") && !data.url.includes("youtu.be")) {
+      return {
+        url: data.url,
+        title: data.title || "YouTube Video",
+        thumbnail: data.thumbnail,
+      };
+    }
+  } catch (e) {
+    console.error("lovd API failed:", e);
+  }
+  return null;
+}
+
+async function trySavefromAPI(url: string) {
+  try {
+    const apiUrl = `https://savefrom.net/api/convert?url=${encodeURIComponent(url)}`;
+    const res = await fetch(apiUrl, {
+      signal: AbortSignal.timeout(15000),
+    });
+    
+    if (!res.ok) return null;
+    
+    const data = await res.json();
+    if (data.url && !data.url.includes("youtube.com/watch") && !data.url.includes("youtu.be")) {
+      return {
+        url: data.url,
+        title: data.title || "YouTube Video",
+        thumbnail: data.thumbnail,
+      };
+    }
+  } catch (e) {
+    console.error("savefrom API failed:", e);
   }
   return null;
 }
@@ -111,10 +158,7 @@ export async function POST(request: NextRequest) {
           useProxy: false
         });
       }
-      
-      return NextResponse.json({ 
-        error: "Cobalt API failed. Try switching to yt1s API or Manual Upload." 
-      }, { status: 400 });
+      return NextResponse.json({ error: "Cobalt API failed. Try yt1s, lovd, savefrom, or Manual Upload." }, { status: 400 });
     }
 
     if (service === "yt1s") {
@@ -128,10 +172,35 @@ export async function POST(request: NextRequest) {
           useProxy: false
         });
       }
-      
-      return NextResponse.json({ 
-        error: "yt1s API failed. Try switching to Cobalt API or Manual Upload." 
-      }, { status: 400 });
+      return NextResponse.json({ error: "yt1s API failed. Try cobalt, lovd, savefrom, or Manual Upload." }, { status: 400 });
+    }
+
+    if (service === "lovd") {
+      const result = await tryLovdAPI(url);
+      if (result) {
+        return NextResponse.json({ 
+          url: result.url,
+          title: result.title,
+          thumbnail: result.thumbnail || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+          status: "ok",
+          useProxy: false
+        });
+      }
+      return NextResponse.json({ error: "lovd API failed. Try cobalt, yt1s, savefrom, or Manual Upload." }, { status: 400 });
+    }
+
+    if (service === "savefrom") {
+      const result = await trySavefromAPI(url);
+      if (result) {
+        return NextResponse.json({ 
+          url: result.url,
+          title: result.title,
+          thumbnail: result.thumbnail || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+          status: "ok",
+          useProxy: false
+        });
+      }
+      return NextResponse.json({ error: "savefrom API failed. Try cobalt, yt1s, lovd, or Manual Upload." }, { status: 400 });
     }
 
     // Manual service - just return metadata
