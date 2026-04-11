@@ -283,9 +283,9 @@ function StudioInner() {
           allWords.push(...offsetWords);
           fullText += (fullText ? " " : "") + chunkTranscription.text;
           
-          // Small delay to avoid rate limiting
+          // Longer delay to avoid rate limiting
           if (i < numChunks - 1) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => setTimeout(resolve, 5000));
           }
         } catch (e) {
           console.error(`Chunk ${i + 1} failed:`, e);
