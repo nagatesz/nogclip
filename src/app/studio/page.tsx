@@ -81,6 +81,7 @@ function StudioInner() {
   const [newWordText, setNewWordText] = useState("");
   const [newWordStart, setNewWordStart] = useState(0);
   const [newWordEnd, setNewWordEnd] = useState(0);
+  const [draggedWordIdx, setDraggedWordIdx] = useState<number | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -360,6 +361,36 @@ function StudioInner() {
     if (!videoRef.current) return;
     setNewWordStart(videoRef.current.currentTime);
     setNewWordEnd(videoRef.current.currentTime + 0.5); // Default 0.5s duration
+  };
+
+  const handleWordDragStart = (e: React.DragEvent, idx: number) => {
+    setDraggedWordIdx(idx);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleWordDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  };
+
+  const handleWordDrop = (e: React.DragEvent, dropIdx: number) => {
+    e.preventDefault();
+    if (draggedWordIdx === null || draggedWordIdx === dropIdx || !transcription) return;
+
+    const words = [...transcription.words];
+    const draggedWord = words[draggedWordIdx];
+    
+    // Remove from old position
+    words.splice(draggedWordIdx, 1);
+    // Insert at new position
+    words.splice(dropIdx, 0, draggedWord);
+    
+    setTranscription({ ...transcription, words });
+    setDraggedWordIdx(null);
+  };
+
+  const handleWordDragEnd = () => {
+    setDraggedWordIdx(null);
   };
 
   const selectClip = (clip: ClipSuggestion) => {
@@ -667,7 +698,17 @@ function StudioInner() {
                     {showSep && <span className="transcript-separator">• • •</span>}
                     <span
                       className={`transcript-word ${isActive ? "active" : ""} ${kwType === "bold" ? "bold-keyword" : ""} ${kwType === "highlight" ? "highlight" : ""}`}
-                      style={{ color: word.color || undefined, borderBottom: wordColorPickerIdx === i ? "2px solid #8b5cf6" : "none" }}
+                      style={{ 
+                        color: word.color || undefined, 
+                        borderBottom: wordColorPickerIdx === i ? "2px solid #8b5cf6" : "none",
+                        cursor: "grab",
+                        opacity: draggedWordIdx === i ? 0.5 : 1
+                      }}
+                      draggable
+                      onDragStart={(e) => handleWordDragStart(e, i)}
+                      onDragOver={handleWordDragOver}
+                      onDrop={(e) => handleWordDrop(e, i)}
+                      onDragEnd={handleWordDragEnd}
                       onContextMenu={(e) => {
                         e.preventDefault();
                         setWordColorPickerIdx(wordColorPickerIdx === i ? null : i);
@@ -684,7 +725,7 @@ function StudioInner() {
                          e.preventDefault();
                          setWordColorPickerIdx(i);
                       }}
-                      title="Click to seek. Click active word to edit."
+                      title="Drag to reorder. Click to seek. Click active word to edit."
                     >
                       {word.word}
                     </span>{" "}
