@@ -238,8 +238,8 @@ function StudioInner() {
 
       const onFFmpegProgress: ProgressCallback = (_p, msg) => setStageMessage(msg);
       
-      // Segmented processing for ALL videos (10-minute chunks)
-      const CHUNK_DURATION = 10 * 60; // 10 minutes per chunk
+      // Segmented processing for ALL videos (20-minute chunks)
+      const CHUNK_DURATION = 20 * 60; // 20 minutes per chunk
       setStage("extracting-audio");
       setStageMessage(`Processing ${Math.ceil(info.duration / CHUNK_DURATION)} chunks...`);
       
