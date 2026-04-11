@@ -87,13 +87,29 @@ export async function getProject(id: string): Promise<Project | undefined> {
 }
 
 export async function updateProject(id: string, updates: Partial<Project>) {
-  const db = await getDB();
-  const tx = db.transaction("projects", "readwrite");
-  const proj = await tx.store.get(id);
-  if (!proj) return;
-  
-  await tx.store.put({ ...proj, ...updates });
-  await tx.done;
+  try {
+    const db = await getDB();
+    const tx = db.transaction("projects", "readwrite");
+    const proj = await tx.store.get(id);
+    if (!proj) return;
+    
+    await tx.store.put({ ...proj, ...updates });
+    await tx.done;
+  } catch (e: any) {
+    if (e.name === 'InvalidStateError' || e.name === 'UnknownError') {
+      // Database connection closed, reopen and retry
+      dbPromise = null as any;
+      const db = await getDB();
+      const tx = db.transaction("projects", "readwrite");
+      const proj = await tx.store.get(id);
+      if (!proj) return;
+      
+      await tx.store.put({ ...proj, ...updates });
+      await tx.done;
+    } else {
+      throw e;
+    }
+  }
 }
 
 export async function getAllProjects(): Promise<Project[]> {
@@ -118,17 +134,37 @@ export async function deleteProject(id: string) {
 }
 
 export async function addClip(clip: Omit<Clip, "id" | "createdAt" | "status">) {
-  const db = await getDB();
-  const id = "clip_" + Math.random().toString(36).substring(2, 9);
-  
-  await db.put("clips", {
-    ...clip,
-    id,
-    status: "ready",
-    createdAt: Date.now()
-  });
-  
-  return id;
+  try {
+    const db = await getDB();
+    const id = "clip_" + Math.random().toString(36).substring(2, 9);
+    
+    await db.put("clips", {
+      ...clip,
+      id,
+      status: "ready",
+      createdAt: Date.now()
+    });
+    
+    return id;
+  } catch (e: any) {
+    if (e.name === 'InvalidStateError' || e.name === 'UnknownError') {
+      // Database connection closed, reopen and retry
+      dbPromise = null as any;
+      const db = await getDB();
+      const id = "clip_" + Math.random().toString(36).substring(2, 9);
+      
+      await db.put("clips", {
+        ...clip,
+        id,
+        status: "ready",
+        createdAt: Date.now()
+      });
+      
+      return id;
+    } else {
+      throw e;
+    }
+  }
 }
 
 export async function getClipsForProject(projectId: string): Promise<Clip[]> {
