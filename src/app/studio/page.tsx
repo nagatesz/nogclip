@@ -235,30 +235,30 @@ function StudioInner() {
       // Limit extraction to prevent memory crashes and FS errors
       const MAX_SAFE_DURATION = 15 * 60; // 15 minutes max for safety
       
-      try {
-        if (extractionDuration > MAX_BROWSER_DURATION) {
-          setStageMessage(`Extracting audio (First 30 minutes due to browser memory limits)...`);
-          extractionDuration = MAX_BROWSER_DURATION;
-          showToast("Long video detected. Analyzing the first 30 minutes.", "success");
-          audioBlob = await extractAudioChunk(file, 0, extractionDuration, onFFmpegProgress);
-        } else if (extractionDuration > MAX_SAFE_DURATION) {
-          setStageMessage(`Extracting audio (First 15 minutes to prevent memory issues)...`);
-          extractionDuration = MAX_SAFE_DURATION;
-          showToast("Long video detected. Analyzing the first 15 minutes.", "success");
-          audioBlob = await extractAudioChunk(file, 0, extractionDuration, onFFmpegProgress);
-        } else {
-          audioBlob = await extractAudio(file, onFFmpegProgress);
-        }
-      } catch (ffmpegError: any) {
-        console.warn("FFmpeg extraction failed, trying Web Audio API fallback:", ffmpegError);
-        setStageMessage("FFmpeg failed, trying alternative extraction...");
-        // Fall back to Web Audio API
+      // Use Web Audio API directly for long videos to bypass FFmpeg FS errors
+      if (extractionDuration > MAX_SAFE_DURATION) {
+        setStageMessage(`Extracting audio (First 15 minutes to prevent memory issues)...`);
+        extractionDuration = MAX_SAFE_DURATION;
+        showToast("Long video detected. Using alternative extraction method.", "success");
         try {
           audioBlob = await extractAudioWithWebAudio(file, onFFmpegProgress);
-          showToast("Used alternative audio extraction method", "success");
-        } catch (webAudioError: any) {
-          console.error("Web Audio API also failed:", webAudioError);
-          throw new Error(`Audio extraction failed: FFmpeg error (${ffmpegError?.message || 'Unknown'}), Web Audio error (${webAudioError?.message || 'Unknown'})`);
+        } catch (e: any) {
+          throw new Error(`Web Audio extraction failed: ${e?.message || 'Unknown error'}`);
+        }
+      } else {
+        // For short videos, try FFmpeg first, fallback to Web Audio API
+        try {
+          audioBlob = await extractAudio(file, onFFmpegProgress);
+        } catch (ffmpegError: any) {
+          console.warn("FFmpeg extraction failed, trying Web Audio API fallback:", ffmpegError);
+          setStageMessage("FFmpeg failed, trying alternative extraction...");
+          try {
+            audioBlob = await extractAudioWithWebAudio(file, onFFmpegProgress);
+            showToast("Used alternative audio extraction method", "success");
+          } catch (webAudioError: any) {
+            console.error("Web Audio API also failed:", webAudioError);
+            throw new Error(`Audio extraction failed: FFmpeg error (${ffmpegError?.message || 'Unknown'}), Web Audio error (${webAudioError?.message || 'Unknown'})`);
+          }
         }
       }
 
