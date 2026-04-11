@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { getClip, getProject } from "@/lib/db";
 import {
   loadFFmpeg, extractAudio, extractAudioChunk, exportClip, trimVideo,
-  getVideoInfo, generateThumbnail, type ExportOptions, type ProgressCallback,
+  getVideoInfo, generateThumbnail, extractAudioWithWebAudio, type ExportOptions, type ProgressCallback,
 } from "@/lib/ffmpeg";
 import { transcribeAudio, type TranscriptionResult } from "@/lib/transcription";
 import { analyzeTranscript, getViralityColor, getViralityLabel, type ClipSuggestion } from "@/lib/ai-analysis";
@@ -229,21 +229,21 @@ function StudioInner() {
       Promise.all(thumbPromises).then(thumbs => setThumbnails(thumbs.filter(t => t !== "")));
 
       const onFFmpegProgress: ProgressCallback = (_p, msg) => setStageMessage(msg);
-      await loadFFmpeg(onFFmpegProgress);
-
+      
       setStage("extracting-audio");
       setStageMessage("Extracting audio track...");
       
       let extractionDuration = info.duration;
       let audioBlob: Blob;
-      // Limit extraction to 15 minutes for videos over 15 minutes to prevent browser crashes
+      // Use Web Audio API for long videos to avoid FFmpeg mounting full file in memory
       const MAX_AUDIO_DURATION = 15 * 60; // 15 minutes
       if (extractionDuration > MAX_AUDIO_DURATION) {
         setStageMessage(`Extracting audio (First 15 minutes to prevent browser crashes)...`);
         extractionDuration = MAX_AUDIO_DURATION;
-        showToast("Long video detected. Processing first 15 minutes for stability.", "success");
-        audioBlob = await extractAudioChunk(file, 0, extractionDuration, onFFmpegProgress);
+        showToast("Long video detected. Using optimized extraction.", "success");
+        audioBlob = await extractAudioWithWebAudio(file, onFFmpegProgress);
       } else {
+        await loadFFmpeg(onFFmpegProgress);
         audioBlob = await extractAudio(file, onFFmpegProgress);
       }
 

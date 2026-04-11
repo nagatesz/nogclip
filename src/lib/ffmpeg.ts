@@ -5,6 +5,68 @@ import { toBlobURL, fetchFile } from "@ffmpeg/util";
 let ffmpegInstance: FFmpeg | null = null;
 let loadPromise: Promise<FFmpeg> | null = null;
 
+// Web Audio API extraction for long videos to avoid FFmpeg memory issues
+export async function extractAudioWithWebAudio(
+  videoFile: File,
+  onProgress?: ProgressCallback
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    video.src = URL.createObjectURL(videoFile);
+    video.muted = true;
+    video.crossOrigin = "anonymous";
+
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const source = audioContext.createMediaElementSource(video);
+    const destination = audioContext.createMediaStreamDestination();
+    source.connect(destination);
+    source.connect(audioContext.destination);
+
+    const mediaRecorder = new MediaRecorder(destination.stream, {
+      mimeType: "audio/webm"
+    });
+
+    const chunks: Blob[] = [];
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = () => {
+      const audioBlob = new Blob(chunks, { type: "audio/webm" });
+      URL.revokeObjectURL(video.src);
+      resolve(audioBlob);
+    };
+
+    video.onloadedmetadata = () => {
+      onProgress?.(0, "Starting audio extraction...");
+      const duration = Math.min(video.duration, 15 * 60); // Limit to 15 minutes for stability
+      video.currentTime = 0;
+      mediaRecorder.start();
+      video.play();
+
+      const updateProgress = () => {
+        const progress = (video.currentTime / duration) * 100;
+        onProgress?.(progress, `Extracting audio... ${Math.round(video.currentTime)}s / ${Math.round(duration)}s`);
+        
+        if (video.currentTime >= duration || video.ended) {
+          mediaRecorder.stop();
+          video.pause();
+        } else {
+          requestAnimationFrame(updateProgress);
+        }
+      };
+      updateProgress();
+    };
+
+    video.onerror = (e) => {
+      URL.revokeObjectURL(video.src);
+      reject(new Error("Video load error"));
+    };
+
+    video.load();
+  });
+}
+
 export interface TrimOptions {
   startTime: number;
   endTime: number;
